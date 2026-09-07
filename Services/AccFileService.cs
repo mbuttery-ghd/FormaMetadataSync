@@ -188,9 +188,11 @@ namespace AccC3DMetadata.Services
             }
 
             if (itemId == null)
+            {
                 throw new InvalidOperationException(
                     $"Could not find '{fileName}' in ACC project '{projectName}'. " +
                     "Add an explicit <DrawingItem itemId=\"...\"> to your .accsync.xml config.");
+            }
 
             var result = (hubId, projectId, itemId);
             _itemCache[localPath] = result; // Cache so repeated sync commands within a session are fast.
@@ -658,14 +660,10 @@ namespace AccC3DMetadata.Services
         /// Parses a Desktop Connector local file path into its ACC-meaningful components.
         /// </summary>
         /// <remarks>
-        /// The Desktop Connector mirrors the ACC folder hierarchy under a fixed root:
-        /// <code>
-        /// C:\Users\{user}\Autodesk Docs\{hub}\{project}\{folder…}\{file}.dwg
-        ///                               [5]    [6]        [7..^1]   [^1]
-        /// </code>
-        /// Segment indices are zero-based after splitting on directory separators. The hub is
-        /// always at index 5 because the root is always five segments deep
-        /// (<c>C:\Users\{user}\Autodesk Docs</c>).
+        /// The local sync root can vary, but cloud-backed ACC files always contain an
+        /// <c>ACCDocs</c> path segment followed by <c>{hub}\{project}\{folder…}\{file}</c>.
+        /// This method locates that root segment dynamically rather than assuming a fixed
+        /// absolute path prefix.
         /// </remarks>
         /// <param name="localPath">Absolute local file path to parse.</param>
         /// <returns>
@@ -682,17 +680,22 @@ namespace AccC3DMetadata.Services
                 new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
                 StringSplitOptions.RemoveEmptyEntries);
 
-            // Minimum required: drive + Users + username + "Autodesk Docs" + hub + project + file = 7 segments.
-            if (segments.Length < 7)
+            int accDocsIndex = Array.FindIndex(
+                segments,
+                segment => string.Equals(segment, "ACCDocs", StringComparison.OrdinalIgnoreCase));
+
+            // Required minimum shape from the ACCDocs root onward: ACCDocs\hub\project\[folders]\file.
+            if (accDocsIndex < 0 || segments.Length - accDocsIndex < 4)
                 return (null, null, null, null);
 
-            string hubName = segments[5];      // Fixed index — always the 6th path segment.
-            string projectName = segments[6];  // Fixed index — always the 7th path segment.
-            string fileName = segments[^1];    // Last segment is always the file name.
+            string hubName = segments[accDocsIndex + 1];
+            string projectName = segments[accDocsIndex + 2];
+            string fileName = segments[^1];
 
-            // Segments between the project name and the file name represent ACC sub-folder names.
-            // If there are fewer than 9 segments there are no intermediate folders.
-            string[] folderPath = segments.Length >= 9 ? segments[7..^1] : Array.Empty<string>();
+            int folderStartIndex = accDocsIndex + 3;
+            string[] folderPath = folderStartIndex < segments.Length - 1
+                ? segments[folderStartIndex..^1]
+                : Array.Empty<string>();
 
             return (hubName, projectName, folderPath, fileName);
         }

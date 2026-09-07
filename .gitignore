@@ -5,3 +5,5 @@ CLAUDE.md
 appsettings.Development.json
 bin/
 obj/
+
+.vs/
