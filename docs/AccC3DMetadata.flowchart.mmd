@@ -1,0 +1,67 @@
+flowchart TD
+    A[AutoCAD loads plugin] --> B[PluginEntry.Initialize]
+    B --> C[Build ACC Sync ribbon tab]
+
+    C --> D{User action}
+    D -->|Pull| E[AccSyncPull]
+    D -->|Push| F[AccSyncPush]
+    D -->|Sync Both| G[AccSyncBoth]
+    D -->|Load Config| H[AccSyncLoadConfig]
+    D -->|Settings| I[AccSyncSettings]
+
+    I --> I1[Save APS Client ID]
+
+    E --> J[SyncOrchestrator.LoadConfigAsync]
+    F --> J
+    G --> J
+    H --> H1[Find .accsync.xml by folder walk]
+
+    J --> K[SyncOrchestrator.RunAsync]
+    K --> L[TokenCache.GetAccessTokenAsync]
+    L --> L1{Cached token valid?}
+    L1 -->|Yes| L2[Use cached access token]
+    L1 -->|No| L3{Refresh token available?}
+    L3 -->|Yes| L4[AuthService.RefreshAsync]
+    L3 -->|No/Fail| L5[Interactive PKCE login]
+
+    K --> M{Config has DrawingItemId?}
+    M -->|Yes| N[Resolve hub+project from path]
+    M -->|No| O[Resolve hub+project+item from local ACCDocs path]
+    O --> O1[Parse local path from ACCDocs root]
+
+    N --> P[Get parent folder for item]
+    O --> P
+
+    P --> Q[Get custom attribute definitions]
+    Q --> R[Get current ACC attribute values + version URN]
+
+    R --> S[Lock document + start transaction]
+    S --> T[Loop mappings]
+
+    T --> U[Read DWG value]
+    U --> V{Direction + conflict strategy}
+    V -->|Read| W[Write ACC value to DWG]
+    V -->|Write| X[Queue DWG value for ACC update]
+    V -->|ReadWrite + Prompt conflict| Y[Collect conflict]
+    V -->|ReadWrite + non-prompt| Z[Apply strategy AccWins/DwgWins/Skip]
+
+    Y --> Y1{Conflicts exist?}
+    Z --> Y1
+    W --> Y1
+    X --> Y1
+
+    Y1 -->|Yes| Y2[Show ConflictResolutionDialog]
+    Y2 --> Y3{Accepted?}
+    Y3 -->|Yes| Y4[Apply chosen resolutions]
+    Y3 -->|No| Y5[Mark conflicts cancelled]
+
+    Y1 -->|No| AA[Commit DWG transaction]
+    Y4 --> AA
+    Y5 --> AA
+
+    AA --> AB{Any ACC updates queued?}
+    AB -->|Yes| AC[PatchCustomAttributesAsync batch update]
+    AB -->|No| AD[Finish]
+    AC --> AD
+
+    AD --> AE[Write summary to AutoCAD command line]
