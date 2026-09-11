@@ -399,10 +399,10 @@ namespace AccC3DMetadata.Services
         public async Task<(Dictionary<string, string> nameToId, Dictionary<string, string> idToName)>
             GetAttributeDefinitionMapsAsync(string projectId, string folderId, string accessToken)
         {
-            string cleanProjectId = StripBPrefix(projectId); // Document Management API rejects the "b." prefix.
+            string dmProjectId = StripBPrefix(projectId); // Document Management API does not use the "b." prefix.
             var request = new HttpRequestMessage(
                 HttpMethod.Get,
-                $"{Bim360DocsBase}/projects/{cleanProjectId}/folders/{Uri.EscapeDataString(folderId)}/custom-attribute-definitions");
+                $"{Bim360DocsBase}/projects/{dmProjectId}/folders/{Uri.EscapeDataString(folderId)}/custom-attribute-definitions");
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
             var response = await _http.SendAsync(request).ConfigureAwait(false);
@@ -417,8 +417,8 @@ namespace AccC3DMetadata.Services
             // The response may be a bare array or wrapped under "data" or "results" depending on
             // the API version and account tier — probe all three shapes defensively.
             var defsArray = root.ValueKind == JsonValueKind.Array ? root
-                : root.TryGetProperty("data", out var d) ? d
                 : root.TryGetProperty("results", out var r) ? r
+                : root.TryGetProperty("data", out var d) ? d
                 : default;
 
             if (defsArray.ValueKind != JsonValueKind.Array)
@@ -480,16 +480,16 @@ namespace AccC3DMetadata.Services
         /// </list>
         /// </returns>
         public async Task<(Dictionary<string, string> values, string versionUrn)> GetCustomAttributesAsync(
-            string projectId, string itemId, Dictionary<string, string> idToName, string accessToken)
+            string projectId, string itemId, Dictionary<string, string> idToName, String accessToken)
         {
-            string cleanProjectId = StripBPrefix(projectId);
+            string dmProjectId = StripBPrefix(projectId);
 
             // The batch-get endpoint accepts an array of URNs so multiple items can be fetched
             // in one round-trip; we always send exactly one because the orchestrator works item-by-item.
             string body = JsonSerializer.Serialize(new { urns = new[] { itemId } });
             var request = new HttpRequestMessage(
                 HttpMethod.Post,
-                $"{Bim360DocsBase}/projects/{cleanProjectId}/versions:batch-get")
+                $"{Bim360DocsBase}/projects/{dmProjectId}/versions:batch-get")
             {
                 Content = new StringContent(body, Encoding.UTF8, "application/json")
             };
@@ -710,7 +710,9 @@ namespace AccC3DMetadata.Services
         /// using a project ID in a Document Management URL.
         /// </remarks>
         private static string StripBPrefix(string id) =>
-            id?.StartsWith("b.", StringComparison.OrdinalIgnoreCase) == true ? id[2..] : id;
+            id.StartsWith("b.", StringComparison.OrdinalIgnoreCase)
+            ? id.Substring(2) 
+            : id;
 
         /// <summary>
         /// Finds the first item in <paramref name="items"/> whose name, as returned by

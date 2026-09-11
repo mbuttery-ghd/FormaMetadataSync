@@ -23,8 +23,8 @@ namespace AccC3DMetadata
         /// Pulls attribute values from ACC into the open DWG (ACC → DWG, read-only direction).
         /// Invoked via ribbon button or by typing <c>AccSyncPull</c> at the command line.
         /// </summary>
-        [CommandMethod("C3DCMD", "AccSyncPull", CommandFlags.Modal)]
-        public async void AccSyncPull()
+        [CommandMethod("ACCSYNC", "AccSyncPull", CommandFlags.Modal)]
+        public static async void AccSyncPull()
         {
             SyncProgressDialog progressDlg = null;
             try
@@ -55,8 +55,8 @@ namespace AccC3DMetadata
         /// Pushes attribute values from the open DWG to ACC (DWG → ACC, write-only direction).
         /// Invoked via ribbon button or by typing <c>AccSyncPush</c> at the command line.
         /// </summary>
-        [CommandMethod("C3DCMD", "AccSyncPush", CommandFlags.Modal)]
-        public async void AccSyncPush()
+        [CommandMethod("ACCSYNC", "AccSyncPush", CommandFlags.Modal)]
+        public static async void AccSyncPush()
         {
             SyncProgressDialog progressDlg = null;
             try
@@ -89,8 +89,8 @@ namespace AccC3DMetadata
         /// and a <see cref="ConflictStrategy.Prompt"/> strategy.
         /// Invoked via ribbon button or by typing <c>AccSyncBoth</c> at the command line.
         /// </summary>
-        [CommandMethod("C3DCMD", "AccSyncBoth", CommandFlags.Modal)]
-        public async void AccSyncBoth()
+        [CommandMethod("ACCSYNC", "AccSyncBoth", CommandFlags.Modal)]
+        public static async void AccSyncBoth()
         {
             SyncProgressDialog progressDlg = null;
             try
@@ -126,8 +126,8 @@ namespace AccC3DMetadata
         /// any sync. Useful for verifying that the config file is correctly placed and parsed.
         /// Invoked via ribbon button or by typing <c>AccSyncLoadConfig</c> at the command line.
         /// </summary>
-        [CommandMethod("C3DCMD", "AccSyncLoadConfig", CommandFlags.Modal)]
-        public async void AccSyncLoadConfig()
+        [CommandMethod("ACCSYNC", "AccSyncLoadConfig", CommandFlags.Modal)]
+        public static async void AccSyncLoadConfig()
         {
             try
             {
@@ -159,8 +159,8 @@ namespace AccC3DMetadata
         /// The ID is stored in the user profile and persists across plugin updates.
         /// Invoked via ribbon button or by typing <c>AccSyncSettings</c> at the command line.
         /// </summary>
-        [CommandMethod("C3DCMD", "AccSyncSettings", CommandFlags.Modal)]
-        public void AccSyncSettings()
+        [CommandMethod("ACCSYNC", "AccSyncSettings", CommandFlags.Modal)]
+        public static void AccSyncSettings()
         {
             try
             {

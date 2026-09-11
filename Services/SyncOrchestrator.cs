@@ -54,21 +54,11 @@ namespace AccC3DMetadata.Services
     /// <c>ConfigureAwait(false)</c> internally, so the actual network I/O still runs off-thread.
     /// </para>
     /// </remarks>
-    public class SyncOrchestrator
+    public class SyncOrchestrator(Document doc)
     {
-        private readonly Document _doc;
-        private readonly Editor _ed;
+        private readonly Document _doc = doc;
+        private readonly Editor _ed = doc.Editor;
         private readonly AccFileService _acc = new();
-
-        /// <summary>
-        /// Initialises the orchestrator for the specified AutoCAD document.
-        /// </summary>
-        /// <param name="doc">The active AutoCAD document to sync.</param>
-        public SyncOrchestrator(Document doc)
-        {
-            _doc = doc;
-            _ed = doc.Editor;
-        }
 
         /// <summary>
         /// Executes the sync pipeline for all mappings in <paramref name="config"/> in the
@@ -93,43 +83,40 @@ namespace AccC3DMetadata.Services
             IProgress<string> progress = null)
         {
             progress?.Report("Authenticating with Autodesk Platform Services…");
-            string token = await TokenCache.GetAccessTokenAsync();
-            if (token == null)
-                throw new InvalidOperationException("Could not obtain an access token.");
+            string token = await TokenCache.GetAccessTokenAsync()
+                ?? throw new InvalidOperationException("Could not obtain an access token.");
 
             // Resolve the ACC project and item IDs for the open drawing.
-            // Hub ID is needed internally by the resolution methods but is not used afterwards;
-            // it is discarded with the _ pattern.
+            // Hub ID is needed internally by the resolution methods but is not used afterwards.
             progress?.Report("Resolving ACC project and item…");
             string projectId, itemId;
             string dwgPath = _doc.Database.Filename;
 
-            if (!string.IsNullOrEmpty(config.DrawingItemId))
+            if (!string.IsNullOrWhiteSpace(config.DrawingItemId))
             {
-                // The config file explicitly specifies the item ID — derive project from the path.
                 itemId = config.DrawingItemId;
-                try
+
+                if (!string.IsNullOrWhiteSpace(config.ProjectId))
                 {
-                    (_, projectId) = await _acc.ResolveHubAndProjectAsync(dwgPath, token);
-                }
-                catch (InvalidOperationException) when (
-                    !string.IsNullOrEmpty(config.HubId) && !string.IsNullOrEmpty(config.ProjectId))
-                {
-                    // Drawing is not under a Desktop Connector folder; use the IDs from the config file.
                     projectId = config.ProjectId;
+                }
+                else
+                {
+                    var hubAndProject = await _acc.ResolveHubAndProjectAsync(dwgPath, token);
+                    projectId = hubAndProject.projectId;
                 }
             }
             else
             {
-                // No explicit item ID in config — derive all three IDs from the Desktop Connector path.
-                (_, projectId, itemId) = await _acc.ResolveItemFromDrawingPathAsync(dwgPath, token);
+                var resolved = await _acc.ResolveItemFromDrawingPathAsync(dwgPath, token);
+                projectId = resolved.projectId;
+                itemId = resolved.itemId;
             }
 
             // The attribute definitions endpoint is folder-scoped, so we need the item's parent folder.
             progress?.Report("Fetching attribute definitions…");
-            string folderId = await _acc.GetItemParentFolderIdAsync(projectId, itemId, token);
-            if (folderId == null)
-                throw new InvalidOperationException(
+            string folderId = await _acc.GetItemParentFolderIdAsync(projectId, itemId, token)
+                ?? throw new InvalidOperationException(
                     $"Could not resolve the parent folder for item '{itemId}'. Cannot fetch attribute definitions.");
 
             // Fetch the definition maps (name ↔ ID) and the current ACC attribute values in parallel context.
@@ -139,9 +126,8 @@ namespace AccC3DMetadata.Services
             // The version URN is different from the item lineage URN — it identifies a specific version.
             progress?.Report("Reading current attribute values from Autodesk Docs…");
             var (accValues, versionUrn) = await _acc.GetCustomAttributesAsync(projectId, itemId, idToName, token);
-            if (versionUrn == null)
-                throw new InvalidOperationException(
-                    $"Could not determine the ACC version URN for item '{itemId}'. Cannot write attribute updates.");
+            string resolvedVersionUrn = versionUrn ?? throw new InvalidOperationException(
+                $"Could not determine the ACC version URN for item '{itemId}'. Cannot write attribute updates.");
 
             // Report any mappings that were skipped during XML parsing (e.g. unrecognised enum values).
             foreach (var warning in config.ParseWarnings)
@@ -204,7 +190,7 @@ namespace AccC3DMetadata.Services
                 // This must run on AutoCAD's STA thread (guaranteed because we do not use
                 // ConfigureAwait(false) in RunAsync) — WPF and Application.ShowModalWindow both
                 // require STA.
-                if (promptConflicts.Any())
+                if (promptConflicts.Count != 0)
                 {
                     var dlg = new ConflictResolutionDialog(promptConflicts);
                     bool accepted = Application.ShowModalWindow(dlg) == true;
@@ -234,10 +220,10 @@ namespace AccC3DMetadata.Services
 
             // Write ACC attribute updates as a single batched POST after the DWG transaction commits.
             // Batching avoids multiple round-trips and ensures all ACC updates are atomic.
-            if (accUpdates.Any())
+            if (accUpdates.Count != 0)
             {
                 progress?.Report($"Writing {accUpdates.Count} change(s) to Autodesk Docs…");
-                await _acc.PatchCustomAttributesAsync(projectId, versionUrn, accUpdates, token);
+                await _acc.PatchCustomAttributesAsync(projectId, resolvedVersionUrn, accUpdates, token);
             }
 
             return result;
@@ -323,7 +309,7 @@ namespace AccC3DMetadata.Services
         /// The attribute value as a string, or <c>null</c> if the block or property set
         /// is not present in the drawing.
         /// </returns>
-        private string ReadDwgValue(Transaction tr, Database db, SyncMapping map)
+        private static string ReadDwgValue(Transaction tr, Database db, SyncMapping map)
         {
             if (map.Target == MappingTarget.BlockAttribute)
             {
@@ -350,7 +336,7 @@ namespace AccC3DMetadata.Services
         /// <param name="db">The active AutoCAD database.</param>
         /// <param name="map">The mapping that describes what to write.</param>
         /// <param name="value">The value to write.</param>
-        private void WriteDwgValue(Transaction tr, Database db, SyncMapping map, string value)
+        private static void WriteDwgValue(Transaction tr, Database db, SyncMapping map, string value)
         {
             if (map.Target == MappingTarget.BlockAttribute)
             {
@@ -384,7 +370,7 @@ namespace AccC3DMetadata.Services
         /// <param name="shouldWrite">Whether DWG → ACC writes are permitted for this mapping.</param>
         /// <param name="accUpdates">List that accumulates pending ACC attribute updates.</param>
         /// <param name="nameToId">Attribute name → definition ID map for queuing ACC updates.</param>
-        private void ApplyResolution(
+        private static void ApplyResolution(
             Transaction tr, Database db, SyncMapping map,
             string accVal, string dwgVal, ConflictStrategy strategy,
             bool shouldRead, bool shouldWrite,

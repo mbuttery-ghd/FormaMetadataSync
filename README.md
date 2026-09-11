@@ -31,7 +31,7 @@ Synchronises custom file attribute values between **Autodesk Forma** and an open
 ## 1. Prerequisites
 
 | Requirement | Notes |
-|---|---|
+| --- | --- |
 | AutoCAD Civil 3D 2025 | Earlier versions are not supported |
 | Autodesk Desktop Connector | Required for automatic hub/project/item resolution from the local file path |
 | Autodesk Forma account | Must have read access to the project; write access required for push operations |
@@ -43,16 +43,20 @@ Synchronises custom file attribute values between **Autodesk Forma** and an open
 
 The plugin ships as an AutoCAD Application Bundle (`AccC3DMetadata.bundle`). AutoCAD discovers bundles automatically on startup — no `NETLOAD` command or startup suite entry is required.
 
-1. Download the latest version from releases at https://github.com/elliotgr2010/FormaMetadataSync/releases
+1. Download the latest version from releases at <https://github.com/elliotgr2010/FormaMetadataSync/releases>
 
 2. Copy the `AccC3DMetadata.bundle` folder into your AutoCAD ApplicationPlugins directory:
-   ```
+
+   ```powershell
    %APPDATA%\Autodesk\ApplicationPlugins\
    ```
+
    The full path is typically:
+
+   ```powershell
+   C:\Users\%USERNAME%\AppData\Roaming\Autodesk\ApplicationPlugins\AccC3DMetadata.bundle
    ```
-   C:\Users\<you>\AppData\Roaming\Autodesk\ApplicationPlugins\AccC3DMetadata.bundle
-   ```
+
 3. Start (or restart) AutoCAD Civil 3D 2025.
 4. The **Forma Sync** ribbon tab loads automatically. No further steps are needed.
 
@@ -77,15 +81,19 @@ The plugin authenticates users via Autodesk Platform Services (APS) OAuth. **Eac
 3. Fill in a name and description for your organisation (e.g. *"Acme Corp — ACC Sync"*).
 4. Under **Application type**, select **Desktop, Mobile, CLI** — this is the only type that supports the PKCE flow used by the plugin. Server-side types require a client secret, which is unsuitable for a locally installed tool.
 5. Under **Callback URL**, add exactly:
-   ```
+
+   ```http
    http://localhost:8080/
    ```
+
    The trailing slash is required and must match exactly.
 6. Under **API access**, enable the following:
+
    | API | Why |
-   |---|---|
+   | --- | --- |
    | Data Management | Hub, project, folder, and item navigation |
    | BIM 360 Document Management | Reading and writing custom file attribute values |
+
 7. Click **Save** (or **Create**). The application is created immediately — no review process.
 8. Copy the **Client ID** shown on the application overview page.
 
@@ -103,7 +111,7 @@ The ID is stored in your Windows user profile (`%APPDATA%\AccC3DSync\accsync.cli
 
 If you prefer, you can still create a plain-text file named `accsync.clientid` in the **same directory as the plugin DLL** (the folder that contains `AccC3DMetadata.dll`). The file should contain only the Client ID on a single line:
 
-```
+```text
 AaBbCcDdEeFfGgHh1234567890
 ```
 
@@ -143,13 +151,13 @@ The plugin searches for a config file starting in the drawing's own folder and w
 **Search order within each directory visited:**
 
 | Priority | File name | Checked in |
-|---|---|---|
+| --- | --- | --- |
 | 1 | `{DrawingName}.accsync.xml` | Drawing's own folder only |
 | 2 | `accsync.xml` | Drawing's folder, then each parent up to the drive root |
 
 **Example folder layout:**
 
-```
+```text
 C:\Autodesk Docs\
 └── My Hub\
     └── My Project\                 ← accsync.xml here acts as the project-wide default
@@ -177,7 +185,7 @@ If no config file is found anywhere in the tree, the sync command fails with a m
 ```
 
 | Attribute | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `version` | Yes | Must be `"1.0"` |
 | `hubId` | No | ACC hub ID. Omit to resolve automatically from the Desktop Connector path. |
 | `projectId` | No | Forma project ID (with or without the `b.` prefix). Omit to resolve automatically. |
@@ -193,7 +201,7 @@ If no config file is found anywhere in the tree, the sync command fails with a m
 ```
 
 | Attribute | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `itemId` | No | The Forma item lineage URN for this specific DWG. Omit entirely to auto-resolve by searching the Forma folder tree for a file whose name matches the open drawing. |
 
 > **Tip:** Omit `<DrawingItem>` for drawings synced via Desktop Connector — the item is found automatically. Add it only if auto-resolution is slow or the drawing name is not unique within the project.
@@ -207,7 +215,7 @@ To find an item ID, navigate to the file in the Forma web interface, click **⋮
 Each `<Mapping>` element requires these attributes regardless of target type:
 
 | Attribute | Required | Values | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `type` | Yes | `BlockAttribute` \| `PropertySet` | Selects the DWG data store to read from or write to |
 | `accAttributeName` | Yes | Any string | Display name of the ACC custom attribute, exactly as it appears in the ACC project settings |
 | `accAttributeId` | No | Numeric ID string | Pre-resolved attribute definition ID. Omit to resolve by name at runtime (recommended) |
@@ -221,7 +229,7 @@ Each `<Mapping>` element requires these attributes regardless of target type:
 Used when `type="BlockAttribute"`. Reads or writes the `TextString` of a named attribute on a named block reference.
 
 | Attribute | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `blockName` | Yes | Name of the AutoCAD block definition (case-insensitive), e.g. `TITLE_BLOCK` |
 | `blockAttributeTag` | Yes | Tag name of the attribute within the block (case-insensitive), e.g. `PROJ_NO` |
 
@@ -234,7 +242,7 @@ The mapping applies to **all instances** of the block found in the current space
 Used when `type="PropertySet"`. Reads or writes a value in a Civil 3D property set attached to matching entities.
 
 | Attribute | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `entityType` | Yes | AutoCAD entity type to search. Currently supported: `BlockReference` |
 | `entityBlockName` | No | When `entityType="BlockReference"`, restricts the search to instances of this block definition. Omit to match all block references |
 | `propertySetName` | Yes | Name of the Civil 3D property set definition (case-insensitive) |
@@ -247,7 +255,7 @@ Used when `type="PropertySet"`. Reads or writes a value in a Civil 3D property s
 ### Direction Values
 
 | Value | Forma → DWG | DWG → Forma | Notes |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `Read` | ✅ | ❌ | Pull only. The DWG value is never sent to Forma. |
 | `Write` | ❌ | ✅ | Push only. The Forma value is never written into the DWG. |
 | `ReadWrite` | ✅ | ✅ | Both directions. Conflicts are handled by `conflictStrategy`. Default. |
@@ -261,7 +269,7 @@ The **command-level** direction (Pull / Push / Both) and the **mapping-level** d
 A conflict occurs in a `ReadWrite` mapping when the Forma value and the DWG value differ at the start of a bidirectional sync.
 
 | Value | Behaviour |
-|---|---|
+| --- | --- |
 | `AccWins` | Overwrites the DWG value with the Forma value. No user prompt. |
 | `DwgWins` | Overwrites the Forma value with the DWG value. No user prompt. |
 | `Prompt` | Defers the decision and shows the [Conflict Resolution Dialog](#9-conflict-resolution-dialog) before committing. Default. |
@@ -408,7 +416,7 @@ All commands are available from the **Forma Sync** ribbon tab or by typing direc
 ### Autodesk Forma panel
 
 | Ribbon Button | Command | Description |
-|---|---|---|
+| --- | --- | --- |
 | Pull from Forma | `AccSyncPull` | Reads all Forma attribute values and writes them into the DWG. Mapping direction `Write` is ignored. |
 | Push to Forma | `AccSyncPush` | Reads all DWG attribute values and writes them to Forma. Mapping direction `Read` is ignored. |
 | Sync Both | `AccSyncBoth` | Bidirectional sync. Prompts for any conflicts where `conflictStrategy="Prompt"`. |
@@ -416,13 +424,13 @@ All commands are available from the **Forma Sync** ribbon tab or by typing direc
 ### Configuration panel
 
 | Ribbon Button | Command | Description |
-|---|---|---|
+| --- | --- | --- |
 | Load Config | `AccSyncLoadConfig` | Locates and parses the config file, printing the resolved hub, project, item ID, and all mappings to the command line. Useful for verifying setup without performing a sync. |
 | Settings | `AccSyncSettings` | Opens the Settings dialog to enter or update the APS Client ID. |
 
 A progress dialog is shown during Pull, Push, and Sync Both operations, reporting each step (authentication, attribute fetching, applying changes). The command line reports a summary on completion, for example:
 
-```
+```text
 Sync complete — 4 mapping(s), 1 conflict(s) resolved, 0 conflict(s) cancelled, 0 error(s).
 ```
 
@@ -435,7 +443,7 @@ The conflict dialog appears during **Sync Both** when one or more mappings have 
 Each row shows:
 
 | Column | Description |
-|---|---|
+| --- | --- |
 | **Attribute** | The Forma attribute display name from the mapping |
 | **Autodesk Forma value** | The value currently stored in Forma |
 | **Drawing value** | The value currently in the drawing |
@@ -480,10 +488,9 @@ The APS Client ID has not been configured. Click **Settings** on the ACC Sync ri
 
 > This section is for developers who want to modify or extend the plugin. End users should follow [Section 2](#2-installation) instead.
 
-
 ### Steps
 
-```
+```powershell
 dotnet build
 ```
 

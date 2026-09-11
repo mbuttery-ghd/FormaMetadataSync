@@ -1,6 +1,7 @@
 using AccC3DMetadata.Services;
 using Autodesk.AutoCAD.Runtime;
 using Autodesk.Windows;
+using System.Runtime.Versioning;
 
 // Registers this class as the AutoCAD extension application entry point.
 // AutoCAD discovers it via reflection on plugin load.
@@ -8,14 +9,15 @@ using Autodesk.Windows;
 
 namespace AccC3DMetadata
 {
+    [SupportedOSPlatform("windows")]
     public class PluginEntry : IExtensionApplication
     {
         public void Initialize()
         {
-            if (ComponentManager.Ribbon != null)
-                RibbonBuilder.BuildRibbon();
-            else
+            if (ComponentManager.Ribbon == null)
                 ComponentManager.ItemInitialized += OnItemInitialized;
+            else
+                RibbonBuilder.BuildRibbon();
         }
 
         private static void OnItemInitialized(object sender, RibbonItemEventArgs e)
