@@ -1,0 +1,33 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Launch AutoCAD C3D 2026 (Debug)",
+            "type": "coreclr",
+            "request": "launch",
+            "program": "C:\\Program Files\\Autodesk\\AutoCAD 2026\\acad.exe",
+            "args": [
+                "/ld",
+                "C:\\Program Files\\Autodesk\\AutoCAD 2026\\AecBase.dbx",
+                "/p",
+                "C:\\Users\\${env:USERNAME}\\OneDrive - GHD\\GHD\\Autodesk\\ACAD User\\GHD C3D 2026.arg",
+                "/product",
+                "C3D",
+                "/language",
+                "en-US"
+            ],
+            "cwd": "C:\\Program Files\\Autodesk\\AutoCAD 2026",
+            "stopAtEntry": false,
+            "console": "internalConsole",
+            "preLaunchTask": "build",
+            "justMyCode": false
+        },
+        {
+            "name": "Attach to AutoCAD (acad.exe)",
+            "type": "coreclr",
+            "request": "attach",
+            "processName": "acad.exe",
+            "justMyCode": false
+        }
+    ]
+}

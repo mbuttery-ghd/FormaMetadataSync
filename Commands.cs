@@ -1,4 +1,8 @@
 using System;
+using System.IO;
+using System.Linq;
+using System.Text;
+using AccC3DMetadata.Config;
 using AccC3DMetadata.Models;
 using AccC3DMetadata.Services;
 using AccC3DMetadata.UI;
@@ -198,6 +202,112 @@ namespace AccC3DMetadata
             catch (System.Exception ex)
             {
                 ed.WriteMessage($"\nAccSyncSettings failed: {ex.Message}\n");
+            }
+        }
+
+        /// <summary>
+        /// Creates or edits the <c>accsync.xml</c> config for the open drawing's folder: pick a
+        /// block, choose which of its attributes to sync, then save locally and push straight to ACC.
+        /// Invoked via ribbon button or by typing <c>AccSyncConfigEditor</c> at the command line.
+        /// </summary>
+        [CommandMethod("ACCSYNC", "AccSyncConfigEditor", CommandFlags.Modal)]
+        public static async void AccSyncConfigEditor()
+        {
+            try
+            {
+                ed.WriteMessage("\nAuthenticating with Autodesk Platform Services…");
+                string token = await TokenCache.GetAccessTokenAsync();
+                if (token == null)
+                {
+                    ed.WriteMessage("\nAccSyncConfigEditor cancelled — no access token.\n");
+                    return;
+                }
+
+                string dwgPath = AcadDoc.Database.Filename;
+                string dwgDir = Path.GetDirectoryName(dwgPath) ?? string.Empty;
+                string configPath = Path.Combine(dwgDir, "accsync.xml");
+
+                SyncConfig existingConfig = File.Exists(configPath)
+                    ? SyncConfigParser.Parse(await File.ReadAllTextAsync(configPath))
+                    : null;
+
+                System.Collections.Generic.List<(
+                    string BlockName,
+                    System.Collections.Generic.List<string> AttributeTags
+                )> blocks;
+                AcadDoc.LockDocument();
+                using (var tr = AcadDoc.Database.TransactionManager.StartTransaction())
+                {
+                    blocks = DwgBlockService
+                        .GetAllBlocksWithAttributes(tr, AcadDoc.Database)
+                        .ToList();
+                    tr.Commit();
+                }
+
+                if (blocks.Count == 0)
+                {
+                    Application.ShowAlertDialog(
+                        "No blocks with attributes were found in the current drawing."
+                    );
+                    return;
+                }
+
+                var dlg = new ConfigEditorDialog(blocks, existingConfig);
+                bool accepted = Application.ShowModalWindow(dlg) == true;
+                if (!accepted)
+                {
+                    ed.WriteMessage("\nConfig editor cancelled.\n");
+                    return;
+                }
+
+                string xml = SyncConfigParser.Serialize(dlg.Result);
+
+                // Mirror the file locally so the sync commands (which only ever read the local
+                // file system) see it immediately, in addition to pushing it straight to ACC.
+                await File.WriteAllTextAsync(configPath, xml);
+
+                ed.WriteMessage("\nResolving ACC hub, project and folder for this drawing…");
+                var acc = new AccFileService();
+                string projectId,
+                    folderId;
+
+                var dcInfo = DesktopConnectorService.TryResolveDrawingLocation(dwgPath);
+                if (dcInfo?.ProjectId != null && dcInfo.FolderUrn != null)
+                {
+                    projectId = dcInfo.ProjectId;
+                    folderId = dcInfo.FolderUrn;
+                }
+                else
+                {
+                    var resolved = await acc.ResolveItemFromDrawingPathAsync(dwgPath, token);
+                    projectId = resolved.projectId;
+                    folderId =
+                        await acc.GetItemParentFolderIdAsync(
+                            resolved.projectId,
+                            resolved.itemId,
+                            token
+                        )
+                        ?? throw new InvalidOperationException(
+                            "Could not resolve the ACC folder for this drawing."
+                        );
+                }
+
+                ed.WriteMessage("\nUploading accsync.xml to Autodesk Forma…");
+                await acc.UploadFileToFolderAsync(
+                    projectId,
+                    folderId,
+                    "accsync.xml",
+                    Encoding.UTF8.GetBytes(xml),
+                    token
+                );
+
+                ed.WriteMessage(
+                    $"\nConfig saved — {dlg.Result.Mappings.Count} mapping(s) written to {configPath}.\n"
+                );
+            }
+            catch (System.Exception ex)
+            {
+                ed.WriteMessage($"\nAccSyncConfigEditor failed: {ex.Message}\n");
             }
         }
     }

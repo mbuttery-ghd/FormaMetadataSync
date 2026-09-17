@@ -12,6 +12,8 @@
           "Autodesk.Authentication": "2.0.0",
           "Autodesk.DataManagement": "2.0.0",
           "Microsoft.Web.WebView2": "1.0.4191.47",
+          "Autodesk.DesktopConnector.API.Public": "17.1.0.16",
+          "LiteDB": "5.0.17.0",
           "Microsoft.Web.WebView2.Core": "1.0.4191.47",
           "Microsoft.Web.WebView2.WinForms": "1.0.4191.47",
           "Microsoft.Web.WebView2.Wpf": "1.0.4191.47"
@@ -331,6 +333,22 @@
           }
         }
       },
+      "Autodesk.DesktopConnector.API.Public/17.1.0.16": {
+        "runtime": {
+          "Autodesk.DesktopConnector.API.Public.dll": {
+            "assemblyVersion": "17.1.0.16",
+            "fileVersion": "17.1.0.16"
+          }
+        }
+      },
+      "LiteDB/5.0.17.0": {
+        "runtime": {
+          "LiteDB.dll": {
+            "assemblyVersion": "5.0.17.0",
+            "fileVersion": "5.0.17.0"
+          }
+        }
+      },
       "Microsoft.Web.WebView2.Core/1.0.4191.47": {
         "runtime": {
           "Microsoft.Web.WebView2.Core.dll": {
@@ -352,6 +370,14 @@
           "Microsoft.Web.WebView2.Wpf.dll": {
             "assemblyVersion": "1.0.4191.47",
             "fileVersion": "1.0.4191.47"
+          }
+        }
+      },
+      "Autodesk.DesktopConnector.API/7.8.1.11": {
+        "runtime": {
+          "Autodesk.DesktopConnector.API.dll": {
+            "assemblyVersion": "7.8.1.11",
+            "fileVersion": "7.8.1.11"
           }
         }
       }
@@ -552,6 +578,16 @@
       "path": "polly.core/8.4.0",
       "hashPath": "polly.core.8.4.0.nupkg.sha512"
     },
+    "Autodesk.DesktopConnector.API.Public/17.1.0.16": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "LiteDB/5.0.17.0": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
     "Microsoft.Web.WebView2.Core/1.0.4191.47": {
       "type": "reference",
       "serviceable": false,
@@ -563,6 +599,11 @@
       "sha512": ""
     },
     "Microsoft.Web.WebView2.Wpf/1.0.4191.47": {
+      "type": "reference",
+      "serviceable": false,
+      "sha512": ""
+    },
+    "Autodesk.DesktopConnector.API/7.8.1.11": {
       "type": "reference",
       "serviceable": false,
       "sha512": ""

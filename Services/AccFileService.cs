@@ -1,6 +1,3 @@
-using Autodesk.DataManagement;
-using Autodesk.DataManagement.Model;
-using Autodesk.SDKManager;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -10,6 +7,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autodesk.DataManagement;
+using Autodesk.DataManagement.Model;
+using Autodesk.SDKManager;
 
 namespace AccC3DMetadata.Services
 {
@@ -43,6 +43,9 @@ namespace AccC3DMetadata.Services
         /// <summary>Autodesk Data Management API base URL — used for item-parent lookup.</summary>
         private const string DataManagementBase = "https://developer.api.autodesk.com/data/v1";
 
+        /// <summary>OSS v2 base URL — used for the signed S3 direct-to-cloud upload flow.</summary>
+        private const string OssBase = "https://developer.api.autodesk.com/oss/v2";
+
         // ── Fields ─────────────────────────────────────────────────────────────────
 
         /// <summary>Lazily created SDK client; recreated whenever the token changes.</summary>
@@ -63,7 +66,10 @@ namespace AccC3DMetadata.Services
         /// Static so the cache survives across multiple <see cref="AccFileService"/> instances
         /// created within the same AutoCAD session.
         /// </summary>
-        private static readonly Dictionary<string, (string hub, string project, string item)> _itemCache = new();
+        private static readonly Dictionary<
+            string,
+            (string hub, string project, string item)
+        > _itemCache = new();
 
         // ── SDK client helper ──────────────────────────────────────────────────────
 
@@ -80,7 +86,8 @@ namespace AccC3DMetadata.Services
             {
                 _dmToken = accessToken;
                 _dm = new DataManagementClient(
-                    authenticationProvider: new StaticAuthenticationProvider(accessToken));
+                    authenticationProvider: new StaticAuthenticationProvider(accessToken)
+                );
             }
             return _dm;
         }
@@ -103,14 +110,18 @@ namespace AccC3DMetadata.Services
         /// cannot be found in the authenticated account.
         /// </exception>
         public async Task<(string hubId, string projectId)> ResolveHubAndProjectAsync(
-            string localPath, string accessToken)
+            string localPath,
+            string accessToken
+        )
         {
             var (hubName, projectName, _, _) = ParseDesktopConnectorPath(localPath);
             if (hubName == null)
                 throw new InvalidOperationException(
-                    $"Drawing path does not appear to be inside an Autodesk Desktop Connector folder.\nPath: {localPath}");
+                    $"Drawing path does not appear to be inside an Autodesk Desktop Connector folder.\nPath: {localPath}"
+                );
 
-            return await LookupHubAndProjectAsync(hubName, projectName, accessToken).ConfigureAwait(false);
+            return await LookupHubAndProjectAsync(hubName, projectName, accessToken)
+                .ConfigureAwait(false);
         }
 
         /// <summary>
@@ -128,8 +139,11 @@ namespace AccC3DMetadata.Services
         /// The path does not match the Desktop Connector structure, the hub or project is not
         /// found, or the file cannot be located in any top-level folder of the project.
         /// </exception>
-        public async Task<(string hubId, string projectId, string itemId)> ResolveItemFromDrawingPathAsync(
-            string localPath, string accessToken)
+        public async Task<(
+            string hubId,
+            string projectId,
+            string itemId
+        )> ResolveItemFromDrawingPathAsync(string localPath, string accessToken)
         {
             // Return early if we have already resolved this path in the current session.
             if (_itemCache.TryGetValue(localPath, out var cached))
@@ -138,14 +152,21 @@ namespace AccC3DMetadata.Services
             var (hubName, projectName, folderPath, fileName) = ParseDesktopConnectorPath(localPath);
             if (hubName == null)
                 throw new InvalidOperationException(
-                    $"Drawing path does not appear to be inside an Autodesk Desktop Connector folder.\n" +
-                    $"Path: {localPath}\n" +
-                    "Add an explicit <DrawingItem itemId=\"...\"> to your .accsync.xml config to override.");
+                    $"Drawing path does not appear to be inside an Autodesk Desktop Connector folder.\n"
+                        + $"Path: {localPath}\n"
+                        + "Add an explicit <DrawingItem itemId=\"...\"> to your .accsync.xml config to override."
+                );
 
-            var (hubId, projectId) = await LookupHubAndProjectAsync(hubName, projectName, accessToken)
+            var (hubId, projectId) = await LookupHubAndProjectAsync(
+                    hubName,
+                    projectName,
+                    accessToken
+                )
                 .ConfigureAwait(false);
 
-            var topFolders = await Dm(accessToken).GetProjectTopFoldersAsync(hubId, projectId).ConfigureAwait(false);
+            var topFolders = await Dm(accessToken)
+                .GetProjectTopFoldersAsync(hubId, projectId)
+                .ConfigureAwait(false);
             var topFolderList = topFolders?.Data?.ToList() ?? new List<TopFolderData>();
 
             string itemId = null;
@@ -158,9 +179,16 @@ namespace AccC3DMetadata.Services
                 foreach (TopFolderData folder in topFolderList)
                 {
                     itemId = await TryNavigateAndFindAsync(
-                        projectId, folder.Id, folderPath, 0, fileName, accessToken)
+                            projectId,
+                            folder.Id,
+                            folderPath,
+                            0,
+                            fileName,
+                            accessToken
+                        )
                         .ConfigureAwait(false);
-                    if (itemId != null) break;
+                    if (itemId != null)
+                        break;
                 }
             }
 
@@ -174,7 +202,12 @@ namespace AccC3DMetadata.Services
                 foreach (TopFolderData folder in topFolderList)
                 {
                     var found = await SearchFolderForAllMatchesAsync(
-                        projectId, folder.Id, fileName, accessToken, Array.Empty<string>())
+                            projectId,
+                            folder.Id,
+                            fileName,
+                            accessToken,
+                            Array.Empty<string>()
+                        )
                         .ConfigureAwait(false);
                     allMatches.AddRange(found);
                 }
@@ -183,15 +216,17 @@ namespace AccC3DMetadata.Services
                 {
                     itemId = allMatches
                         .OrderByDescending(m => CountMatchingTrailingSegments(m.path, folderPath))
-                        .First().itemId;
+                        .First()
+                        .itemId;
                 }
             }
 
             if (itemId == null)
             {
                 throw new InvalidOperationException(
-                    $"Could not find '{fileName}' in ACC project '{projectName}'. " +
-                    "Add an explicit <DrawingItem itemId=\"...\"> to your .accsync.xml config.");
+                    $"Could not find '{fileName}' in ACC project '{projectName}'. "
+                        + "Add an explicit <DrawingItem itemId=\"...\"> to your .accsync.xml config."
+                );
             }
 
             var result = (hubId, projectId, itemId);
@@ -213,24 +248,35 @@ namespace AccC3DMetadata.Services
         /// to assist with diagnosis.
         /// </exception>
         private async Task<(string hubId, string projectId)> LookupHubAndProjectAsync(
-            string hubName, string projectName, string accessToken)
+            string hubName,
+            string projectName,
+            string accessToken
+        )
         {
             var hubs = await Dm(accessToken).GetHubsAsync().ConfigureAwait(false);
             var hub = FindByName(hubs?.Data, h => h.Attributes?.Name, hubName);
             if (hub == null)
             {
-                var available = string.Join(", ", hubs?.Data?.Select(h => h.Attributes?.Name) ?? Enumerable.Empty<string>());
+                var available = string.Join(
+                    ", ",
+                    hubs?.Data?.Select(h => h.Attributes?.Name) ?? Enumerable.Empty<string>()
+                );
                 throw new InvalidOperationException(
-                    $"ACC hub '{hubName}' not found. Available hubs: [{available}]");
+                    $"ACC hub '{hubName}' not found. Available hubs: [{available}]"
+                );
             }
 
             var projects = await Dm(accessToken).GetHubProjectsAsync(hub.Id).ConfigureAwait(false);
             var project = FindByName(projects?.Data, p => p.Attributes?.Name, projectName);
             if (project == null)
             {
-                var available = string.Join(", ", projects?.Data?.Select(p => p.Attributes?.Name) ?? Enumerable.Empty<string>());
+                var available = string.Join(
+                    ", ",
+                    projects?.Data?.Select(p => p.Attributes?.Name) ?? Enumerable.Empty<string>()
+                );
                 throw new InvalidOperationException(
-                    $"ACC project '{projectName}' not found in hub '{hub.Attributes?.Name}'. Available projects: [{available}]");
+                    $"ACC project '{projectName}' not found in hub '{hub.Attributes?.Name}'. Available projects: [{available}]"
+                );
             }
 
             return (hub.Id, project.Id);
@@ -250,11 +296,19 @@ namespace AccC3DMetadata.Services
         /// <param name="accessToken">A valid 3-legged Bearer access token.</param>
         /// <returns>The item ID string, or <c>null</c> if the file is not found.</returns>
         private async Task<string> TryNavigateAndFindAsync(
-            string projectId, string folderId, string[] folderPath, int depth,
-            string fileName, string accessToken)
+            string projectId,
+            string folderId,
+            string[] folderPath,
+            int depth,
+            string fileName,
+            string accessToken
+        )
         {
-            var contents = await Dm(accessToken).GetFolderContentsAsync(projectId, folderId).ConfigureAwait(false);
-            if (contents?.Data == null) return null;
+            var contents = await Dm(accessToken)
+                .GetFolderContentsAsync(projectId, folderId)
+                .ConfigureAwait(false);
+            if (contents?.Data == null)
+                return null;
 
             if (depth >= folderPath.Length)
             {
@@ -266,13 +320,18 @@ namespace AccC3DMetadata.Services
                         // FolderContents.Data is a polymorphic collection of items and sub-folders;
                         // we use dynamic and check Type to skip sub-folders at this level.
                         string type = entry.Type?.ToString();
-                        if (string.Equals(type, "folders", StringComparison.OrdinalIgnoreCase)) continue;
+                        if (string.Equals(type, "folders", StringComparison.OrdinalIgnoreCase))
+                            continue;
 
                         string displayName = (string)entry.Attributes?.DisplayName;
-                        if (string.Equals(displayName, fileName, StringComparison.OrdinalIgnoreCase))
+                        if (
+                            string.Equals(displayName, fileName, StringComparison.OrdinalIgnoreCase)
+                        )
                             return (string)entry.Id;
                     }
-                    catch { /* Malformed entry from the SDK — skip and continue. */ }
+                    catch
+                    { /* Malformed entry from the SDK — skip and continue. */
+                    }
                 }
                 return null;
             }
@@ -284,15 +343,24 @@ namespace AccC3DMetadata.Services
                 try
                 {
                     string type = entry.Type?.ToString();
-                    if (!string.Equals(type, "folders", StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!string.Equals(type, "folders", StringComparison.OrdinalIgnoreCase))
+                        continue;
 
                     string displayName = (string)entry.Attributes?.DisplayName;
                     if (string.Equals(displayName, targetName, StringComparison.OrdinalIgnoreCase))
                         return await TryNavigateAndFindAsync(
-                            projectId, (string)entry.Id, folderPath, depth + 1, fileName, accessToken)
+                                projectId,
+                                (string)entry.Id,
+                                folderPath,
+                                depth + 1,
+                                fileName,
+                                accessToken
+                            )
                             .ConfigureAwait(false);
                 }
-                catch { /* Malformed entry — skip. */ }
+                catch
+                { /* Malformed entry — skip. */
+                }
             }
             return null;
         }
@@ -310,11 +378,19 @@ namespace AccC3DMetadata.Services
         /// <param name="currentPath">Folder names accumulated from the search root to this folder.</param>
         /// <returns>All matching <c>(itemId, folderPath)</c> pairs found anywhere in the subtree.</returns>
         private async Task<List<(string itemId, string[] path)>> SearchFolderForAllMatchesAsync(
-            string projectId, string folderId, string fileName, string accessToken, string[] currentPath)
+            string projectId,
+            string folderId,
+            string fileName,
+            string accessToken,
+            string[] currentPath
+        )
         {
             var matches = new List<(string, string[])>();
-            var contents = await Dm(accessToken).GetFolderContentsAsync(projectId, folderId).ConfigureAwait(false);
-            if (contents?.Data == null) return matches;
+            var contents = await Dm(accessToken)
+                .GetFolderContentsAsync(projectId, folderId)
+                .ConfigureAwait(false);
+            if (contents?.Data == null)
+                return matches;
 
             var subfolders = new List<(string id, string name)>();
 
@@ -327,17 +403,25 @@ namespace AccC3DMetadata.Services
 
                     if (string.Equals(type, "folders", StringComparison.OrdinalIgnoreCase))
                         subfolders.Add(((string)entry.Id, displayName));
-                    else if (string.Equals(displayName, fileName, StringComparison.OrdinalIgnoreCase))
+                    else if (
+                        string.Equals(displayName, fileName, StringComparison.OrdinalIgnoreCase)
+                    )
                         matches.Add(((string)entry.Id, currentPath));
                 }
-                catch { /* Malformed entry — skip. */ }
+                catch
+                { /* Malformed entry — skip. */
+                }
             }
 
             foreach (var (subId, subName) in subfolders)
             {
                 var subMatches = await SearchFolderForAllMatchesAsync(
-                    projectId, subId, fileName, accessToken,
-                    [.. currentPath, subName])
+                        projectId,
+                        subId,
+                        fileName,
+                        accessToken,
+                        [.. currentPath, subName]
+                    )
                     .ConfigureAwait(false);
                 matches.AddRange(subMatches);
             }
@@ -351,13 +435,23 @@ namespace AccC3DMetadata.Services
         /// Used to score fallback search results against the folder path derived from the DC
         /// local path so the closest match is selected when duplicate filenames exist.
         /// </summary>
-        private static int CountMatchingTrailingSegments(string[] candidatePath, string[] expectedPath)
+        private static int CountMatchingTrailingSegments(
+            string[] candidatePath,
+            string[] expectedPath
+        )
         {
             int count = 0;
             int ci = candidatePath.Length - 1;
             int ei = expectedPath.Length - 1;
-            while (ci >= 0 && ei >= 0 &&
-                   string.Equals(candidatePath[ci], expectedPath[ei], StringComparison.OrdinalIgnoreCase))
+            while (
+                ci >= 0
+                && ei >= 0
+                && string.Equals(
+                    candidatePath[ci],
+                    expectedPath[ei],
+                    StringComparison.OrdinalIgnoreCase
+                )
+            )
             {
                 count++;
                 ci--;
@@ -396,19 +490,24 @@ namespace AccC3DMetadata.Services
         ///   <item><description><c>idToName</c> — maps definition ID → attribute display name.</description></item>
         /// </list>
         /// </returns>
-        public async Task<(Dictionary<string, string> nameToId, Dictionary<string, string> idToName)>
-            GetAttributeDefinitionMapsAsync(string projectId, string folderId, string accessToken)
+        public async Task<(
+            Dictionary<string, string> nameToId,
+            Dictionary<string, string> idToName
+        )> GetAttributeDefinitionMapsAsync(string projectId, string folderId, string accessToken)
         {
             string dmProjectId = StripBPrefix(projectId); // Document Management API does not use the "b." prefix.
             var request = new HttpRequestMessage(
                 HttpMethod.Get,
-                $"{Bim360DocsBase}/projects/{dmProjectId}/folders/{Uri.EscapeDataString(folderId)}/custom-attribute-definitions");
+                $"{Bim360DocsBase}/projects/{dmProjectId}/folders/{Uri.EscapeDataString(folderId)}/custom-attribute-definitions"
+            );
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
 
             var response = await _http.SendAsync(request).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+            using var doc = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync().ConfigureAwait(false)
+            );
             var root = doc.RootElement;
 
             var nameToId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -416,7 +515,8 @@ namespace AccC3DMetadata.Services
 
             // The response may be a bare array or wrapped under "data" or "results" depending on
             // the API version and account tier — probe all three shapes defensively.
-            var defsArray = root.ValueKind == JsonValueKind.Array ? root
+            var defsArray =
+                root.ValueKind == JsonValueKind.Array ? root
                 : root.TryGetProperty("results", out var r) ? r
                 : root.TryGetProperty("data", out var d) ? d
                 : default;
@@ -426,8 +526,12 @@ namespace AccC3DMetadata.Services
 
             foreach (var def in defsArray.EnumerateArray())
             {
-                string id = def.TryGetProperty("id", out var idProp) ? JsonScalarToString(idProp) : null;
-                string name = def.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+                string id = def.TryGetProperty("id", out var idProp)
+                    ? JsonScalarToString(idProp)
+                    : null;
+                string name = def.TryGetProperty("name", out var nameProp)
+                    ? nameProp.GetString()
+                    : null;
                 if (id != null && name != null)
                 {
                     nameToId[name] = id;
@@ -479,8 +583,15 @@ namespace AccC3DMetadata.Services
         ///   </description></item>
         /// </list>
         /// </returns>
-        public async Task<(Dictionary<string, string> values, string versionUrn)> GetCustomAttributesAsync(
-            string projectId, string itemId, Dictionary<string, string> idToName, String accessToken)
+        public async Task<(
+            Dictionary<string, string> values,
+            string versionUrn
+        )> GetCustomAttributesAsync(
+            string projectId,
+            string itemId,
+            Dictionary<string, string> idToName,
+            String accessToken
+        )
         {
             string dmProjectId = StripBPrefix(projectId);
 
@@ -489,9 +600,10 @@ namespace AccC3DMetadata.Services
             string body = JsonSerializer.Serialize(new { urns = new[] { itemId } });
             var request = new HttpRequestMessage(
                 HttpMethod.Post,
-                $"{Bim360DocsBase}/projects/{dmProjectId}/versions:batch-get")
+                $"{Bim360DocsBase}/projects/{dmProjectId}/versions:batch-get"
+            )
             {
-                Content = new StringContent(body, Encoding.UTF8, "application/json")
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -499,14 +611,19 @@ namespace AccC3DMetadata.Services
             var response = await _http.SendAsync(request).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+            using var doc = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync().ConfigureAwait(false)
+            );
             var root = doc.RootElement;
 
             var values = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             string versionUrn = null;
 
             // Response shape: { "results": [ { "urn": "…", "customAttributes": [ { "id": 123, "name": "…", "value": "…" } ] } ] }
-            if (!root.TryGetProperty("results", out var results) || results.ValueKind != JsonValueKind.Array)
+            if (
+                !root.TryGetProperty("results", out var results)
+                || results.ValueKind != JsonValueKind.Array
+            )
                 return (values, versionUrn);
 
             // We sent one URN so there is at most one result — process the first element only.
@@ -519,21 +636,30 @@ namespace AccC3DMetadata.Services
                 else if (version.TryGetProperty("id", out var idProp))
                     versionUrn = idProp.GetString(); // Some API versions use "id" instead of "urn".
 
-                if (!version.TryGetProperty("customAttributes", out var customAttrs)) break;
+                if (!version.TryGetProperty("customAttributes", out var customAttrs))
+                    break;
 
                 foreach (var attr in customAttrs.EnumerateArray())
                 {
                     // Prefer the inline "name" field; fall back to resolving the numeric "id" via the map.
-                    string name = attr.TryGetProperty("name", out var nameProp) ? nameProp.GetString() : null;
+                    string name = attr.TryGetProperty("name", out var nameProp)
+                        ? nameProp.GetString()
+                        : null;
                     if (name == null)
                     {
-                        string defId = attr.TryGetProperty("id", out var defIdProp) ? JsonScalarToString(defIdProp) : null;
-                        if (defId != null) idToName.TryGetValue(defId, out name);
+                        string defId = attr.TryGetProperty("id", out var defIdProp)
+                            ? JsonScalarToString(defIdProp)
+                            : null;
+                        if (defId != null)
+                            idToName.TryGetValue(defId, out name);
                     }
 
                     // A JSON null value means the attribute exists but has no value assigned.
-                    string val = attr.TryGetProperty("value", out var valProp) && valProp.ValueKind != JsonValueKind.Null
-                        ? valProp.GetString() : null;
+                    string val =
+                        attr.TryGetProperty("value", out var valProp)
+                        && valProp.ValueKind != JsonValueKind.Null
+                            ? valProp.GetString()
+                            : null;
 
                     if (name != null)
                         values[name] = val;
@@ -557,25 +683,36 @@ namespace AccC3DMetadata.Services
         /// The folder ID string, or <c>null</c> if the parent relationship is absent from
         /// the response (which should not occur for a valid item).
         /// </returns>
-        public async Task<string> GetItemParentFolderIdAsync(string projectId, string itemId, string accessToken)
+        public async Task<string> GetItemParentFolderIdAsync(
+            string projectId,
+            string itemId,
+            string accessToken
+        )
         {
             var request = new HttpRequestMessage(
                 HttpMethod.Get,
-                $"{DataManagementBase}/projects/{projectId}/items/{Uri.EscapeDataString(itemId)}");
+                $"{DataManagementBase}/projects/{projectId}/items/{Uri.EscapeDataString(itemId)}"
+            );
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             var response = await _http.SendAsync(request).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
-            using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync().ConfigureAwait(false));
+            using var doc = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync().ConfigureAwait(false)
+            );
             var root = doc.RootElement;
 
             // Navigate: data → relationships → parent → data → id
-            if (!root.TryGetProperty("data", out var data)) return null;
-            if (!data.TryGetProperty("relationships", out var rels)) return null;
-            if (!rels.TryGetProperty("parent", out var parent)) return null;
-            if (!parent.TryGetProperty("data", out var parentData)) return null;
+            if (!root.TryGetProperty("data", out var data))
+                return null;
+            if (!data.TryGetProperty("relationships", out var rels))
+                return null;
+            if (!rels.TryGetProperty("parent", out var parent))
+                return null;
+            if (!parent.TryGetProperty("data", out var parentData))
+                return null;
             return parentData.TryGetProperty("id", out var id) ? id.GetString() : null;
         }
 
@@ -606,9 +743,11 @@ namespace AccC3DMetadata.Services
         /// </param>
         /// <param name="accessToken">A valid 3-legged Bearer access token.</param>
         public async Task PatchCustomAttributesAsync(
-            string projectId, string versionUrn,
+            string projectId,
+            string versionUrn,
             IEnumerable<(string definitionId, string value)> updates,
-            string accessToken)
+            string accessToken
+        )
         {
             string cleanProjectId = StripBPrefix(projectId);
 
@@ -627,15 +766,340 @@ namespace AccC3DMetadata.Services
             string json = JsonSerializer.Serialize(entries);
             var request = new HttpRequestMessage(
                 HttpMethod.Post,
-                $"{Bim360DocsBase}/projects/{cleanProjectId}/versions/{Uri.EscapeDataString(versionUrn)}/custom-attributes:batch-update")
+                $"{Bim360DocsBase}/projects/{cleanProjectId}/versions/{Uri.EscapeDataString(versionUrn)}/custom-attributes:batch-update"
+            )
             {
-                Content = new StringContent(json, Encoding.UTF8, "application/json")
+                Content = new StringContent(json, Encoding.UTF8, "application/json"),
             };
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
             var response = await _http.SendAsync(request).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
+        }
+
+        // ── File upload (config editor writes accsync.xml to ACC) ──────────────────
+
+        /// <summary>
+        /// Uploads <paramref name="content"/> to ACC as a file named <paramref name="fileName"/>
+        /// inside <paramref name="folderId"/>, creating a new item if one does not already exist
+        /// with that name, or a new version of the existing item otherwise.
+        /// </summary>
+        /// <remarks>
+        /// Follows the standard Data Management API upload sequence: create a storage object,
+        /// upload the bytes to it via the OSS v2 signed-S3 flow, then create or version the item.
+        /// </remarks>
+        /// <param name="projectId">ACC project ID, including the <c>"b."</c> prefix.</param>
+        /// <param name="folderId">URN of the destination folder.</param>
+        /// <param name="fileName">Display name to give the uploaded file.</param>
+        /// <param name="content">The file's raw bytes.</param>
+        /// <param name="accessToken">A valid 3-legged Bearer access token.</param>
+        public async Task UploadFileToFolderAsync(
+            string projectId,
+            string folderId,
+            string fileName,
+            byte[] content,
+            string accessToken
+        )
+        {
+            string storageUrn = await CreateStorageObjectAsync(
+                    projectId,
+                    folderId,
+                    fileName,
+                    accessToken
+                )
+                .ConfigureAwait(false);
+            var (bucketKey, objectKey) = ParseStorageUrn(storageUrn);
+            await UploadBytesToOssAsync(bucketKey, objectKey, content, accessToken)
+                .ConfigureAwait(false);
+
+            string existingItemId = await FindItemIdInFolderAsync(
+                    projectId,
+                    folderId,
+                    fileName,
+                    accessToken
+                )
+                .ConfigureAwait(false);
+
+            if (existingItemId == null)
+                await CreateItemAsync(projectId, folderId, fileName, storageUrn, accessToken)
+                    .ConfigureAwait(false);
+            else
+                await CreateVersionAsync(
+                        projectId,
+                        existingItemId,
+                        fileName,
+                        storageUrn,
+                        accessToken
+                    )
+                    .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Requests a storage object URN from the Data Management API for a new file in
+        /// <paramref name="folderId"/>. The returned URN is used both as the OSS upload target
+        /// and as the <c>storage</c> relationship when the item/version is created.
+        /// </summary>
+        private async Task<string> CreateStorageObjectAsync(
+            string projectId,
+            string folderId,
+            string fileName,
+            string accessToken
+        )
+        {
+            var body = new
+            {
+                jsonapi = new { version = "1.0" },
+                data = new
+                {
+                    type = "objects",
+                    attributes = new { name = fileName },
+                    relationships = new
+                    {
+                        target = new { data = new { type = "folders", id = folderId } },
+                    },
+                },
+            };
+
+            var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{DataManagementBase}/projects/{projectId}/storage"
+            )
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(body),
+                    Encoding.UTF8,
+                    "application/vnd.api+json"
+                ),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+
+            using var doc = JsonDocument.Parse(
+                await response.Content.ReadAsStringAsync().ConfigureAwait(false)
+            );
+            return doc.RootElement.GetProperty("data").GetProperty("id").GetString();
+        }
+
+        /// <summary>
+        /// Uploads raw bytes to an OSS object via the signed-S3 flow: request an upload URL,
+        /// PUT the bytes directly to cloud storage, then finalise the upload.
+        /// </summary>
+        private async Task UploadBytesToOssAsync(
+            string bucketKey,
+            string objectKey,
+            byte[] content,
+            string accessToken
+        )
+        {
+            var signRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                $"{OssBase}/buckets/{bucketKey}/objects/{Uri.EscapeDataString(objectKey)}/signeds3upload?parts=1"
+            );
+            signRequest.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                accessToken
+            );
+
+            var signResponse = await _http.SendAsync(signRequest).ConfigureAwait(false);
+            signResponse.EnsureSuccessStatusCode();
+
+            using var signDoc = JsonDocument.Parse(
+                await signResponse.Content.ReadAsStringAsync().ConfigureAwait(false)
+            );
+            string uploadKey = signDoc.RootElement.GetProperty("uploadKey").GetString();
+            string uploadUrl = signDoc.RootElement.GetProperty("urls")[0].GetString();
+
+            // The signed URL is pre-authorised — no Bearer header is sent (or accepted) here.
+            var putRequest = new HttpRequestMessage(HttpMethod.Put, uploadUrl)
+            {
+                Content = new ByteArrayContent(content),
+            };
+            var putResponse = await _http.SendAsync(putRequest).ConfigureAwait(false);
+            putResponse.EnsureSuccessStatusCode();
+
+            var completeRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{OssBase}/buckets/{bucketKey}/objects/{Uri.EscapeDataString(objectKey)}/signeds3upload"
+            )
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { uploadKey }),
+                    Encoding.UTF8,
+                    "application/json"
+                ),
+            };
+            completeRequest.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                accessToken
+            );
+
+            var completeResponse = await _http.SendAsync(completeRequest).ConfigureAwait(false);
+            completeResponse.EnsureSuccessStatusCode();
+        }
+
+        /// <summary>
+        /// Searches the top level of <paramref name="folderId"/> for a file (not a sub-folder)
+        /// whose display name matches <paramref name="fileName"/>.
+        /// </summary>
+        /// <returns>The item ID if found, otherwise <c>null</c>.</returns>
+        private async Task<string> FindItemIdInFolderAsync(
+            string projectId,
+            string folderId,
+            string fileName,
+            string accessToken
+        )
+        {
+            var contents = await Dm(accessToken)
+                .GetFolderContentsAsync(projectId, folderId)
+                .ConfigureAwait(false);
+            if (contents?.Data == null)
+                return null;
+
+            foreach (dynamic entry in contents.Data)
+            {
+                try
+                {
+                    string type = entry.Type?.ToString();
+                    if (string.Equals(type, "folders", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    string displayName = (string)entry.Attributes?.DisplayName;
+                    if (string.Equals(displayName, fileName, StringComparison.OrdinalIgnoreCase))
+                        return (string)entry.Id;
+                }
+                catch
+                { /* Malformed entry from the SDK — skip and continue. */
+                }
+            }
+            return null;
+        }
+
+        /// <summary>Creates a brand-new ACC item (with its first version) from a storage URN.</summary>
+        private async Task CreateItemAsync(
+            string projectId,
+            string folderId,
+            string fileName,
+            string storageUrn,
+            string accessToken
+        )
+        {
+            var body = new
+            {
+                jsonapi = new { version = "1.0" },
+                data = new
+                {
+                    type = "items",
+                    attributes = new
+                    {
+                        displayName = fileName,
+                        extension = new { type = "items:autodesk.bim360:File", version = "1.0" },
+                    },
+                    relationships = new
+                    {
+                        tip = new { data = new { type = "versions", id = "1" } },
+                        parent = new { data = new { type = "folders", id = folderId } },
+                    },
+                },
+                included = new object[]
+                {
+                    new
+                    {
+                        type = "versions",
+                        id = "1",
+                        attributes = new
+                        {
+                            name = fileName,
+                            extension = new
+                            {
+                                type = "versions:autodesk.bim360:File",
+                                version = "1.0",
+                            },
+                        },
+                        relationships = new
+                        {
+                            storage = new { data = new { type = "objects", id = storageUrn } },
+                        },
+                    },
+                },
+            };
+
+            var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{DataManagementBase}/projects/{projectId}/items"
+            )
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(body),
+                    Encoding.UTF8,
+                    "application/vnd.api+json"
+                ),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+        }
+
+        /// <summary>Creates a new version of an existing ACC item from a storage URN.</summary>
+        private async Task CreateVersionAsync(
+            string projectId,
+            string itemId,
+            string fileName,
+            string storageUrn,
+            string accessToken
+        )
+        {
+            var body = new
+            {
+                jsonapi = new { version = "1.0" },
+                data = new
+                {
+                    type = "versions",
+                    attributes = new
+                    {
+                        name = fileName,
+                        extension = new { type = "versions:autodesk.bim360:File", version = "1.0" },
+                    },
+                    relationships = new
+                    {
+                        item = new { data = new { type = "items", id = itemId } },
+                        storage = new { data = new { type = "objects", id = storageUrn } },
+                    },
+                },
+            };
+
+            var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{DataManagementBase}/projects/{projectId}/versions"
+            )
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(body),
+                    Encoding.UTF8,
+                    "application/vnd.api+json"
+                ),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            response.EnsureSuccessStatusCode();
+        }
+
+        /// <summary>
+        /// Splits a storage object URN (<c>urn:adsk.objects:os.object:{bucketKey}/{objectKey}</c>)
+        /// into its bucket key and object key for use with the OSS v2 API.
+        /// </summary>
+        private static (string bucketKey, string objectKey) ParseStorageUrn(string storageUrn)
+        {
+            const string prefix = "urn:adsk.objects:os.object:";
+            string rest = storageUrn.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+                ? storageUrn[prefix.Length..]
+                : storageUrn;
+            int slash = rest.IndexOf('/');
+            return (rest[..slash], rest[(slash + 1)..]);
         }
 
         // ── Private helpers ────────────────────────────────────────────────────────
@@ -649,12 +1113,13 @@ namespace AccC3DMetadata.Services
         /// some account configurations and as JSON strings in others. Using this helper ensures
         /// the <c>nameToId</c> / <c>idToName</c> maps handle both forms consistently.
         /// </remarks>
-        private static string JsonScalarToString(JsonElement el) => el.ValueKind switch
-        {
-            JsonValueKind.String => el.GetString(),
-            JsonValueKind.Number => el.GetRawText(), // GetRawText() preserves the exact numeric representation.
-            _ => null
-        };
+        private static string JsonScalarToString(JsonElement el) =>
+            el.ValueKind switch
+            {
+                JsonValueKind.String => el.GetString(),
+                JsonValueKind.Number => el.GetRawText(), // GetRawText() preserves the exact numeric representation.
+                _ => null,
+            };
 
         /// <summary>
         /// Parses a Desktop Connector local file path into its ACC-meaningful components.
@@ -670,19 +1135,25 @@ namespace AccC3DMetadata.Services
         /// A tuple of <c>(hubName, projectName, folderPath, fileName)</c>. All four values are
         /// <c>null</c> if <paramref name="localPath"/> does not match the expected structure.
         /// </returns>
-        private static (string hubName, string projectName, string[] folderPath, string fileName)
-            ParseDesktopConnectorPath(string localPath)
+        private static (
+            string hubName,
+            string projectName,
+            string[] folderPath,
+            string fileName
+        ) ParseDesktopConnectorPath(string localPath)
         {
             if (string.IsNullOrEmpty(localPath))
                 return (null, null, null, null);
 
             var segments = localPath.Split(
                 new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
-                StringSplitOptions.RemoveEmptyEntries);
+                StringSplitOptions.RemoveEmptyEntries
+            );
 
             int accDocsIndex = Array.FindIndex(
                 segments,
-                segment => string.Equals(segment, "ACCDocs", StringComparison.OrdinalIgnoreCase));
+                segment => string.Equals(segment, "ACCDocs", StringComparison.OrdinalIgnoreCase)
+            );
 
             // Required minimum shape from the ACCDocs root onward: ACCDocs\hub\project\[folders]\file.
             if (accDocsIndex < 0 || segments.Length - accDocsIndex < 4)
@@ -693,9 +1164,10 @@ namespace AccC3DMetadata.Services
             string fileName = segments[^1];
 
             int folderStartIndex = accDocsIndex + 3;
-            string[] folderPath = folderStartIndex < segments.Length - 1
-                ? segments[folderStartIndex..^1]
-                : Array.Empty<string>();
+            string[] folderPath =
+                folderStartIndex < segments.Length - 1
+                    ? segments[folderStartIndex..^1]
+                    : Array.Empty<string>();
 
             return (hubName, projectName, folderPath, fileName);
         }
@@ -710,9 +1182,7 @@ namespace AccC3DMetadata.Services
         /// using a project ID in a Document Management URL.
         /// </remarks>
         private static string StripBPrefix(string id) =>
-            id.StartsWith("b.", StringComparison.OrdinalIgnoreCase)
-            ? id.Substring(2) 
-            : id;
+            id.StartsWith("b.", StringComparison.OrdinalIgnoreCase) ? id.Substring(2) : id;
 
         /// <summary>
         /// Finds the first item in <paramref name="items"/> whose name, as returned by
@@ -734,24 +1204,38 @@ namespace AccC3DMetadata.Services
         /// <param name="nameSelector">Function that extracts the display name from an item.</param>
         /// <param name="target">The name to search for.</param>
         /// <returns>The first matching item, or <c>null</c> if not found.</returns>
-        private static T FindByName<T>(IEnumerable<T> items, Func<T, string> nameSelector, string target)
+        private static T FindByName<T>(
+            IEnumerable<T> items,
+            Func<T, string> nameSelector,
+            string target
+        )
             where T : class
         {
-            if (items == null || target == null) return null;
+            if (items == null || target == null)
+                return null;
             var list = items.ToList();
 
             // Pass 1 — exact case-insensitive match.
             var hit = list.FirstOrDefault(x =>
-                string.Equals(nameSelector(x), target, StringComparison.OrdinalIgnoreCase));
-            if (hit != null) return hit;
+                string.Equals(nameSelector(x), target, StringComparison.OrdinalIgnoreCase)
+            );
+            if (hit != null)
+                return hit;
 
             // Pass 2 — normalised match: trim outer whitespace and collapse internal runs.
             static string Normalise(string s) =>
-                s == null ? null : System.Text.RegularExpressions.Regex.Replace(s.Trim(), @"\s+", " ");
+                s == null
+                    ? null
+                    : System.Text.RegularExpressions.Regex.Replace(s.Trim(), @"\s+", " ");
 
             string normTarget = Normalise(target);
             return list.FirstOrDefault(x =>
-                string.Equals(Normalise(nameSelector(x)), normTarget, StringComparison.OrdinalIgnoreCase));
+                string.Equals(
+                    Normalise(nameSelector(x)),
+                    normTarget,
+                    StringComparison.OrdinalIgnoreCase
+                )
+            );
         }
     }
 }

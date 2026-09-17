@@ -1,6 +1,7 @@
-using Autodesk.AutoCAD.DatabaseServices;
 using System;
 using System.Collections.Generic;
+using System.Linq;
+using Autodesk.AutoCAD.DatabaseServices;
 
 namespace AccC3DMetadata.Services
 {
@@ -31,25 +32,86 @@ namespace AccC3DMetadata.Services
         /// The sequence is empty when the block or tag is not found.
         /// </returns>
         public static IEnumerable<(ObjectId blockRefId, string value)> ReadBlockAttributeValues(
-            Transaction tr, Database db, string blockName, string tag)
+            Transaction tr,
+            Database db,
+            string blockName,
+            string tag
+        )
         {
             // Open the current space (model or active paper-space layout) for reading.
             var cs = tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead) as BlockTableRecord;
-            if (cs == null) yield break;
+            if (cs == null)
+                yield break;
 
             foreach (ObjectId entId in cs)
             {
                 // Skip anything that is not a block reference.
-                if (tr.GetObject(entId, OpenMode.ForRead) is not BlockReference br) continue;
-                if (!string.Equals(br.Name, blockName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (tr.GetObject(entId, OpenMode.ForRead) is not BlockReference br)
+                    continue;
+                if (!string.Equals(br.Name, blockName, StringComparison.OrdinalIgnoreCase))
+                    continue;
 
                 foreach (ObjectId arId in br.AttributeCollection)
                 {
                     var ar = tr.GetObject(arId, OpenMode.ForRead) as AttributeReference;
-                    if (ar != null && string.Equals(ar.Tag, tag, StringComparison.OrdinalIgnoreCase))
+                    if (
+                        ar != null
+                        && string.Equals(ar.Tag, tag, StringComparison.OrdinalIgnoreCase)
+                    )
                         yield return (entId, ar.TextString);
                 }
             }
+        }
+
+        /// <summary>
+        /// Enumerates every distinct block definition that has at least one instance with
+        /// attributes in the current space, together with the union of attribute tags found
+        /// across all of its instances. Used by the config editor to build the block picker
+        /// and attribute table.
+        /// </summary>
+        /// <param name="tr">The active AutoCAD transaction.</param>
+        /// <param name="db">The active AutoCAD database.</param>
+        /// <returns>
+        /// A sequence of <c>(blockName, attributeTags)</c> pairs in first-seen order.
+        /// </returns>
+        public static IEnumerable<(
+            string BlockName,
+            List<string> AttributeTags
+        )> GetAllBlocksWithAttributes(Transaction tr, Database db)
+        {
+            var cs = tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead) as BlockTableRecord;
+            if (cs == null)
+                yield break;
+
+            var tagsByBlock = new Dictionary<string, List<string>>(
+                StringComparer.OrdinalIgnoreCase
+            );
+            var order = new List<string>();
+
+            foreach (ObjectId entId in cs)
+            {
+                if (tr.GetObject(entId, OpenMode.ForRead) is not BlockReference br)
+                    continue;
+                if (br.AttributeCollection.Count == 0)
+                    continue;
+
+                if (!tagsByBlock.TryGetValue(br.Name, out var tags))
+                {
+                    tags = new List<string>();
+                    tagsByBlock[br.Name] = tags;
+                    order.Add(br.Name);
+                }
+
+                foreach (ObjectId arId in br.AttributeCollection)
+                {
+                    var ar = tr.GetObject(arId, OpenMode.ForRead) as AttributeReference;
+                    if (ar != null && !tags.Contains(ar.Tag, StringComparer.OrdinalIgnoreCase))
+                        tags.Add(ar.Tag);
+                }
+            }
+
+            foreach (string name in order)
+                yield return (name, tagsByBlock[name]);
         }
 
         /// <summary>
@@ -65,22 +127,33 @@ namespace AccC3DMetadata.Services
         /// leaving the attribute in an invalid state.
         /// </param>
         public static void WriteBlockAttributeValues(
-            Transaction tr, Database db, string blockName, string tag, string value)
+            Transaction tr,
+            Database db,
+            string blockName,
+            string tag,
+            string value
+        )
         {
             var cs = tr.GetObject(db.CurrentSpaceId, OpenMode.ForRead) as BlockTableRecord;
-            if (cs == null) return;
+            if (cs == null)
+                return;
 
             foreach (ObjectId entId in cs)
             {
                 // Open directly for write — we know we will modify any matching block reference,
                 // so a two-step read-then-upgrade would just add overhead.
-                if (tr.GetObject(entId, OpenMode.ForWrite) is not BlockReference br) continue;
-                if (!string.Equals(br.Name, blockName, StringComparison.OrdinalIgnoreCase)) continue;
+                if (tr.GetObject(entId, OpenMode.ForWrite) is not BlockReference br)
+                    continue;
+                if (!string.Equals(br.Name, blockName, StringComparison.OrdinalIgnoreCase))
+                    continue;
 
                 foreach (ObjectId arId in br.AttributeCollection)
                 {
                     var ar = tr.GetObject(arId, OpenMode.ForWrite) as AttributeReference;
-                    if (ar != null && string.Equals(ar.Tag, tag, StringComparison.OrdinalIgnoreCase))
+                    if (
+                        ar != null
+                        && string.Equals(ar.Tag, tag, StringComparison.OrdinalIgnoreCase)
+                    )
                         ar.TextString = value ?? string.Empty;
                 }
             }

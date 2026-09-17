@@ -1,21 +1,25 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
-    <PropertyGroup>
-        <OutputType>Library</OutputType>
-        <RootNamespace>AccC3DMetadata</RootNamespace>
-        <TargetFramework>net8.0-windows</TargetFramework>
-        <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
-        <Platforms>AnyCPU;x64</Platforms>
-        <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-        <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    </PropertyGroup>
-    <PropertyGroup>
-        <AcadDir>$(AcadDir)</AcadDir>
-        <AcadDir Condition="'$(AcadDir)' == ''">C:\Program Files\Autodesk\AutoCAD 2025\</AcadDir>
-        <ArxMgdPath>$(AcadDir)</ArxMgdPath>
-        <OMFMgdPath>$(AcadDir)ACA\</OMFMgdPath>
-        <AeccMgdPath>$(AcadDir)C3D\</AeccMgdPath>
-        <AssemblySearchPaths>$(AcadDir);$(OMFMgdPath);$(AeccMgdPath);$(AssemblySearchPaths)</AssemblySearchPaths>
-    </PropertyGroup>
+  <PropertyGroup>
+    <OutputType>Library</OutputType>
+    <RootNamespace>AccC3DMetadata</RootNamespace>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <GenerateAssemblyInfo>False</GenerateAssemblyInfo>
+    <Platforms>AnyCPU;x64</Platforms>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+  <PropertyGroup>
+    <AcadDir>$(AcadDir)</AcadDir>
+    <AcadDir Condition="'$(AcadDir)' == ''">C:\Program Files\Autodesk\AutoCAD 2025\</AcadDir>
+    <ArxMgdPath>$(AcadDir)</ArxMgdPath>
+    <OMFMgdPath>$(AcadDir)ACA\</OMFMgdPath>
+    <AeccMgdPath>$(AcadDir)C3D\</AeccMgdPath>
+    <AssemblySearchPaths>$(AcadDir);$(OMFMgdPath);$(AeccMgdPath);$(AssemblySearchPaths)</AssemblySearchPaths>
+    <DesktopConnectorDir>$(DesktopConnectorDir)</DesktopConnectorDir>
+    <DesktopConnectorDir Condition="'$(DesktopConnectorDir)' == ''"
+      >C:\Program Files\Autodesk\Desktop Connector\</DesktopConnectorDir
+    >
+  </PropertyGroup>
   <PropertyGroup>
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
@@ -24,44 +28,54 @@
     <PackageReference Include="Autodesk.DataManagement" Version="2.0.0" />
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
-    <ItemGroup>
-        <Reference Include="AcDbMgd">
-            <Private>False</Private>
-        </Reference>
-        <Reference Include="accoremgd">
-            <Private>False</Private>
-        </Reference>
-        <Reference Include="AcMgd">
-            <Private>False</Private>
-        </Reference>
-        <Reference Include="AeccDbMgd">
-            <Private>False</Private>
-        </Reference>
-        <Reference Include="AecBaseMgd">
-            <Private>False</Private>
-        </Reference>
-        <Reference Include="AeccPressurePipesMgd">
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="AecPropDataMgd">
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="AcDbMgdBrep">
-            <Private>false</Private>
-        </Reference>
-        <Reference Include="AdWindows">
-            <HintPath>$(AcadDir)AdWindows.dll</HintPath>
-            <Private>False</Private>
-        </Reference>
-    </ItemGroup>
-    <ItemGroup Condition=" '$(UsingMicrosoftNETSdk)' == 'true' or '$(CLRSupport)' == 'NetCore' ">
-        <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
-    </ItemGroup>
-    <ItemDefinitionGroup Condition=" '$(CLRSupport)' == 'NetCore' ">
-        <ClCompile>
-            <DisableSpecificWarnings>4945;%(DisableSpecificWarnings)</DisableSpecificWarnings>
-        </ClCompile>
-    </ItemDefinitionGroup>
+  <ItemGroup>
+    <Reference Include="AcDbMgd">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="accoremgd">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="AcMgd">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="AeccDbMgd">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="AecBaseMgd">
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="AeccPressurePipesMgd">
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AecPropDataMgd">
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AcDbMgdBrep">
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="AdWindows">
+      <HintPath>$(AcadDir)AdWindows.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <!-- Used by the config editor to read Desktop Connector's local LiteDB property cache
+             and query its public API for hub/project/folder identifiers without a network call. -->
+    <Reference Include="LiteDB">
+      <HintPath>$(DesktopConnectorDir)LiteDB.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+    <Reference Include="Autodesk.DesktopConnector.API.Public">
+      <HintPath>$(DesktopConnectorDir)Autodesk.DesktopConnector.API.Public.dll</HintPath>
+      <Private>True</Private>
+    </Reference>
+  </ItemGroup>
+  <ItemGroup Condition=" '$(UsingMicrosoftNETSdk)' == 'true' or '$(CLRSupport)' == 'NetCore' ">
+    <FrameworkReference Include="Microsoft.WindowsDesktop.App" />
+  </ItemGroup>
+  <ItemDefinitionGroup Condition=" '$(CLRSupport)' == 'NetCore' ">
+    <ClCompile>
+      <DisableSpecificWarnings>4945;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+    </ClCompile>
+  </ItemDefinitionGroup>
 
   <!--
     Post-build: populate AccC3DMetadata.bundle/Contents/ with the plugin DLL and all
@@ -80,8 +94,40 @@
       <_BundleDeps Include="$(OutputPath)*.deps.json" />
       <_BundleFiles Include="@(_BundleDlls);@(_BundleDeps)" />
     </ItemGroup>
-    <Copy SourceFiles="@(_BundleFiles)" DestinationFolder="$(BundleContentsDir)" SkipUnchangedFiles="true" />
+    <Copy
+      SourceFiles="@(_BundleFiles)"
+      DestinationFolder="$(BundleContentsDir)"
+      SkipUnchangedFiles="true"
+    />
     <Message Text="Bundle updated → $(BundleContentsDir)" Importance="high" />
   </Target>
 
+  <!--
+    If this bundle is already installed (copied) under the current user's AutoCAD
+    ApplicationPlugins folder for autoload, keep that copy in sync too — otherwise
+    debug sessions would silently run against a stale build.
+  -->
+  <PropertyGroup>
+    <InstalledBundleDir>$(APPDATA)\Autodesk\ApplicationPlugins\AccC3DMetadata.bundle</InstalledBundleDir>
+  </PropertyGroup>
+
+  <Target
+    Name="DeployToInstalledBundle"
+    AfterTargets="PopulateBundleContents"
+    Condition="Exists('$(InstalledBundleDir)')"
+  >
+    <ItemGroup>
+      <_InstalledBundleFiles Include="$(OutputPath)*.dll" />
+      <_InstalledBundleFiles Include="$(OutputPath)*.deps.json" />
+    </ItemGroup>
+    <Copy
+      SourceFiles="@(_InstalledBundleFiles)"
+      DestinationFolder="$(InstalledBundleDir)\Contents"
+      SkipUnchangedFiles="true"
+    />
+    <Message
+      Text="Installed AutoCAD bundle refreshed → $(InstalledBundleDir)\Contents"
+      Importance="high"
+    />
+  </Target>
 </Project>
