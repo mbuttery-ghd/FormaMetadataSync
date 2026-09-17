@@ -22,6 +22,7 @@
   <ItemGroup>
     <PackageReference Include="Autodesk.Authentication" Version="2.0.0" />
     <PackageReference Include="Autodesk.DataManagement" Version="2.0.0" />
+    <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4191.47" />
   </ItemGroup>
     <ItemGroup>
         <Reference Include="AcDbMgd">
@@ -75,13 +76,11 @@
   <Target Name="PopulateBundleContents" AfterTargets="Build">
     <MakeDir Directories="$(BundleContentsDir)" />
     <ItemGroup>
-      <_BundleDlls   Include="$(OutputPath)*.dll" />
-      <_BundleDeps   Include="$(OutputPath)*.deps.json" />
-      <_BundleFiles  Include="@(_BundleDlls);@(_BundleDeps)" />
+      <_BundleDlls Include="$(OutputPath)*.dll" />
+      <_BundleDeps Include="$(OutputPath)*.deps.json" />
+      <_BundleFiles Include="@(_BundleDlls);@(_BundleDeps)" />
     </ItemGroup>
-    <Copy SourceFiles="@(_BundleFiles)"
-          DestinationFolder="$(BundleContentsDir)"
-          SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_BundleFiles)" DestinationFolder="$(BundleContentsDir)" SkipUnchangedFiles="true" />
     <Message Text="Bundle updated → $(BundleContentsDir)" Importance="high" />
   </Target>
 

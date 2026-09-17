@@ -1,0 +1,9 @@
+{
+	"servers": {
+		"autodesk-product-help": {
+			"url": "https://developer.api.autodesk.com/knowledge/public/v1/mcp",
+			"type": "http"
+		}
+	},
+	"inputs": []
+}

@@ -1,10 +1,10 @@
-using Autodesk.Authentication.Model;
-using Autodesk.AutoCAD.ApplicationServices;
-using Autodesk.AutoCAD.EditorInput;
 using System;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading.Tasks;
+using Autodesk.Authentication.Model;
+using Autodesk.AutoCAD.ApplicationServices;
+using Autodesk.AutoCAD.EditorInput;
 
 namespace AccC3DMetadata
 {
@@ -18,7 +18,7 @@ namespace AccC3DMetadata
         protected static Document AcadDoc => Application.DocumentManager.MdiActiveDocument;
 
         /// <summary>Gets the <see cref="Editor"/> for the active document.</summary>
-        protected static Editor Ed => AcadDoc.Editor;
+        protected static Editor ed => AcadDoc.Editor;
 
         /// <summary>
         /// OAuth redirect URI used for the loopback PKCE auth flow.
@@ -44,10 +44,7 @@ namespace AccC3DMetadata
         /// <c>/</c> with <c>_</c>, and strips the <c>=</c> padding.
         /// </summary>
         private static string Base64UrlEncode(byte[] input) =>
-            Convert.ToBase64String(input)
-                .Replace("+", "-")
-                .Replace("/", "_")
-                .TrimEnd('=');
+            Convert.ToBase64String(input).Replace("+", "-").Replace("/", "_").TrimEnd('=');
 
         // ── Authentication ─────────────────────────────────────────────────────────
 
@@ -73,7 +70,13 @@ namespace AccC3DMetadata
             string clientId = ClientConfig.ClientId;
             if (string.IsNullOrWhiteSpace(clientId))
             {
-                Ed.WriteMessage("\nUNABLE TO OBTAIN CLIENT ID");
+                const string msg =
+                    "No APS Client ID is configured. Use the AccSyncSettings "
+                    + "command (or ribbon Settings button) to enter one before signing in.";
+                ed.WriteMessage($"\n{msg}");
+                // Command-line text is easy to miss — also raise a visible dialog so the
+                // failure isn't silent to the user.
+                Application.ShowAlertDialog(msg);
                 return null;
             }
 
@@ -88,20 +91,31 @@ namespace AccC3DMetadata
 
             try
             {
-                Ed.WriteMessage("\nStarting interactive 3-legged auth via AuthService...");
+                ed.WriteMessage("\nStarting interactive 3-legged auth via AuthService...");
                 var authService = new AuthService();
                 ThreeLeggedToken token = await authService
                     .GetThreeLeggedTokenAsync(clientId, codeChallenge, codeVerifier, _redirUrl)
                     .ConfigureAwait(false);
 
-                Ed.WriteMessage(token != null
-                    ? "\nAuthentication succeeded."
-                    : "\nAuthentication returned a null token.");
+                ed.WriteMessage(
+                    token != null
+                        ? "\nAuthentication succeeded."
+                        : "\nAuthentication returned a null token."
+                );
                 return token;
+            }
+            catch (OperationCanceledException)
+            {
+                // The user closed the sign-in window — not an error, just an aborted attempt.
+                ed.WriteMessage("\nSign-in was cancelled.");
+                return null;
             }
             catch (Exception ex)
             {
-                Ed.WriteMessage($"\nAuthentication failed: {ex.Message}");
+                ed.WriteMessage($"\nAuthentication failed: {ex.Message}");
+                // Surface a visible dialog too — a failed sign-in with no dialog looks like
+                // nothing happened, especially if the command window/palette isn't in view.
+                Application.ShowAlertDialog($"Authentication failed:\n{ex.Message}");
                 return null;
             }
         }

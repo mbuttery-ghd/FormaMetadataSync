@@ -1,12 +1,15 @@
-using Autodesk.Authentication;
-using Autodesk.Authentication.Model;
-using Autodesk.SDKManager;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
+using System.Security.Cryptography;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
+using AccC3DMetadata.UI;
+using Autodesk.Authentication;
+using Autodesk.Authentication.Model;
+using Autodesk.SDKManager;
 
 namespace AccC3DMetadata
 {
@@ -24,12 +27,12 @@ namespace AccC3DMetadata
         /// </summary>
         private static readonly List<Scopes> _scopes = new()
         {
-            Scopes.DataRead,    // Read hubs, projects, folders, and items via the Data Management API.
-            Scopes.DataWrite,   // Required for future write operations against Data Management endpoints.
+            Scopes.DataRead, // Read hubs, projects, folders, and items via the Data Management API.
+            Scopes.DataWrite, // Required for future write operations against Data Management endpoints.
             Scopes.AccountRead, // Read account and hub metadata.
-            Scopes.BucketRead,  // Read OSS bucket contents (used for config file download via the OSS API).
+            Scopes.BucketRead, // Read OSS bucket contents (used for config file download via the OSS API).
             Scopes.BucketCreate,
-            Scopes.ViewablesRead
+            Scopes.ViewablesRead,
         };
 
         /// <summary>
@@ -50,7 +53,9 @@ namespace AccC3DMetadata
         /// <returns>A new <see cref="ThreeLeggedToken"/> containing fresh access and refresh tokens.</returns>
         public async Task<ThreeLeggedToken> RefreshAsync(string clientId, string refreshToken)
             // clientSecret is null for public (PKCE) clients — the SDK accepts null here.
-            => await _authClient.RefreshTokenAsync(clientId, null, refreshToken, _scopes)
+            =>
+            await _authClient
+                .RefreshTokenAsync(clientId, null, refreshToken, _scopes)
                 .ConfigureAwait(false);
 
         /// <summary>
@@ -70,23 +75,41 @@ namespace AccC3DMetadata
         /// The loopback HTTP URI that the auth server will redirect to after authorisation
         /// (e.g. <c>http://localhost:8080/</c>).
         /// </param>
+        /// <param name="cancellationToken">
+        /// Cancels a pending sign-in (e.g. from a "Cancel" action in the caller's UI) by closing
+        /// the embedded sign-in window immediately, rather than waiting for it to time out.
+        /// </param>
         /// <returns>A <see cref="ThreeLeggedToken"/> containing the access and refresh tokens.</returns>
         /// <exception cref="ArgumentNullException">
         /// <paramref name="clientId"/> or <paramref name="redirectUri"/> is null or whitespace.
         /// </exception>
+        /// <exception cref="OperationCanceledException">
+        /// The user closed the sign-in window before completing authorisation.
+        /// </exception>
         /// <exception cref="InvalidOperationException">
-        /// The system browser could not be launched, or the authorisation server returned an error.
+        /// The browser could not be launched, or the authorisation server returned an error.
         /// </exception>
         /// <exception cref="TimeoutException">
-        /// The user did not complete authorisation within 2 minutes.
+        /// The user did not complete authorisation within 2 minutes (fallback flow only).
         /// </exception>
         public async Task<ThreeLeggedToken> GetThreeLeggedTokenAsync(
-            string clientId, string codeChallenge, string codeVerifier, string redirectUri)
+            string clientId,
+            string codeChallenge,
+            string codeVerifier,
+            string redirectUri,
+            CancellationToken cancellationToken = default
+        )
         {
             if (string.IsNullOrWhiteSpace(clientId))
                 throw new ArgumentNullException(nameof(clientId));
             if (string.IsNullOrWhiteSpace(redirectUri))
                 throw new ArgumentNullException(nameof(redirectUri));
+
+            // A random per-flow value, echoed back by the auth server and verified against the
+            // callback response. Without this, a malicious local process could race the real
+            // browser redirect and inject its own authorization code into our loopback listener
+            // (login CSRF / auth-code injection) — the state check rejects any mismatched callback.
+            string expectedState = Convert.ToBase64String(RandomNumberGenerator.GetBytes(16));
 
             // Build the authorization URL using the SDK — this includes the PKCE challenge
             // and all required query parameters.
@@ -95,9 +118,119 @@ namespace AccC3DMetadata
                 ResponseType.Code,
                 redirectUri,
                 _scopes,
+                state: expectedState,
                 codeChallengeMethod: "S256",
-                codeChallenge: codeChallenge);
+                codeChallenge: codeChallenge
+            );
 
+            string authorizationCode;
+            try
+            {
+                // Preferred: an in-process WebView2 window. The user closing it is an immediate,
+                // explicit cancellation — there's no lingering listener/port and no multi-minute
+                // hang if they abandon the sign-in.
+                authorizationCode = await GetAuthorizationCodeViaEmbeddedBrowserAsync(
+                        authorizeUrl,
+                        redirectUri,
+                        expectedState,
+                        cancellationToken
+                    )
+                    .ConfigureAwait(false);
+            }
+            catch (WebView2RuntimeNotFoundException)
+            {
+                // Fallback for machines without the WebView2 Runtime installed.
+                authorizationCode = await GetAuthorizationCodeViaSystemBrowserAsync(
+                        authorizeUrl,
+                        redirectUri,
+                        expectedState
+                    )
+                    .ConfigureAwait(false);
+            }
+
+            // Exchange the authorisation code for access + refresh tokens.
+            // The code verifier is sent here (not during the browser step) — the server hashes it
+            // and compares with the challenge to prove the caller holds the original secret.
+            return await _authClient
+                .GetThreeLeggedTokenAsync(
+                    clientId,
+                    authorizationCode,
+                    redirectUri,
+                    codeVerifier: codeVerifier
+                )
+                .ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Runs the sign-in flow in an in-process <see cref="AuthBrowserWindow"/> and returns the
+        /// authorisation code from the intercepted redirect. Validates <paramref name="expectedState"/>
+        /// to guard against auth-code injection.
+        /// </summary>
+        private static async Task<string> GetAuthorizationCodeViaEmbeddedBrowserAsync(
+            string authorizeUrl,
+            string redirectUri,
+            string expectedState,
+            CancellationToken cancellationToken
+        )
+        {
+            var window = new AuthBrowserWindow(authorizeUrl, redirectUri);
+            Uri redirect = await window
+                .WaitForRedirectAsync(cancellationToken)
+                .ConfigureAwait(false);
+
+            var query = ParseQueryString(redirect.Query);
+
+            string error = query.TryGetValue("error", out var errVal) ? errVal : null;
+            if (!string.IsNullOrEmpty(error))
+                throw new InvalidOperationException(
+                    $"Authorisation error returned by the server: {error}"
+                );
+
+            string returnedState = query.TryGetValue("state", out var stateVal) ? stateVal : null;
+            if (returnedState != expectedState)
+                throw new InvalidOperationException(
+                    "The authorisation callback's state did not match the expected value — "
+                        + "rejecting for safety. Please retry the sign-in."
+                );
+
+            string code = query.TryGetValue("code", out var codeVal) ? codeVal : null;
+            if (string.IsNullOrEmpty(code))
+                throw new InvalidOperationException(
+                    "The authorisation response did not contain a code."
+                );
+
+            return code;
+        }
+
+        /// <summary>Parses a URL query string (e.g. <c>?a=1&amp;b=2</c>) without a System.Web dependency.</summary>
+        private static Dictionary<string, string> ParseQueryString(string query)
+        {
+            var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            foreach (
+                string pair in query
+                    .TrimStart('?')
+                    .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            )
+            {
+                int eq = pair.IndexOf('=');
+                string key = eq < 0 ? pair : pair[..eq];
+                string value = eq < 0 ? string.Empty : pair[(eq + 1)..];
+                result[WebUtility.UrlDecode(key)] = WebUtility.UrlDecode(value);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Legacy fallback: opens the system default browser and listens on a loopback
+        /// <see cref="HttpListener"/> for the redirect, used only when the WebView2 Runtime is
+        /// unavailable. Subject to a 2-minute timeout and local port/URL-ACL requirements.
+        /// </summary>
+        private static async Task<string> GetAuthorizationCodeViaSystemBrowserAsync(
+            string authorizeUrl,
+            string redirectUri,
+            string expectedState
+        )
+        {
             string authorizationCode;
 
             // Start the loopback listener BEFORE opening the browser to avoid a race condition
@@ -107,21 +240,45 @@ namespace AccC3DMetadata
                 // HttpListener requires a trailing slash on the prefix.
                 var prefix = redirectUri.TrimEnd('/') + "/";
                 listener.Prefixes.Add(prefix);
-                listener.Start();
 
                 try
                 {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = authorizeUrl,
-                        UseShellExecute = true // Required for the OS default browser to handle the URL.
-                    });
+                    listener.Start();
+                }
+                catch (HttpListenerException ex)
+                {
+                    // Common on machines where the redirect URI has never been granted a URL ACL
+                    // reservation (error 5, "Access is denied") or where another process already
+                    // owns the port (error 32/183). Both fail silently for the caller unless we
+                    // translate them into an actionable message here.
+                    string hint =
+                        ex.NativeErrorCode == 5
+                            ? "Access is denied binding to the redirect URI. Run this once from an "
+                                + $"elevated command prompt, then retry:\n  netsh http add urlacl url={prefix} user=Everyone"
+                            : $"Port {new Uri(prefix).Port} may already be in use by another application "
+                                + "(e.g. another AutoCAD session, IIS Express, or a dev server). Close it and retry.";
+                    throw new InvalidOperationException(
+                        $"Could not start the local sign-in listener on {prefix}: {ex.Message}\n{hint}",
+                        ex
+                    );
+                }
+
+                try
+                {
+                    Process.Start(
+                        new ProcessStartInfo
+                        {
+                            FileName = authorizeUrl,
+                            UseShellExecute = true, // Required for the OS default browser to handle the URL.
+                        }
+                    );
                 }
                 catch
                 {
                     listener.Stop();
                     throw new InvalidOperationException(
-                        $"Unable to open the system browser. Open this URL manually:\n{authorizeUrl}");
+                        $"Unable to open the system browser. Open this URL manually:\n{authorizeUrl}"
+                    );
                 }
 
                 // Wait for the browser redirect, with a 2-minute timeout to avoid hanging forever.
@@ -145,17 +302,33 @@ namespace AccC3DMetadata
                     byte[] buffer = Encoding.UTF8.GetBytes(html);
                     context.Response.ContentType = "text/html";
                     context.Response.ContentLength64 = buffer.Length;
-                    await context.Response.OutputStream.WriteAsync(buffer, 0, buffer.Length).ConfigureAwait(false);
+                    await context
+                        .Response.OutputStream.WriteAsync(buffer, 0, buffer.Length)
+                        .ConfigureAwait(false);
                     context.Response.OutputStream.Close();
                 }
-                catch { /* Ignore — the page is cosmetic only. */ }
+                catch
+                { /* Ignore — the page is cosmetic only. */
+                }
 
                 // Extract the authorisation code (or propagate an error) from the redirect query string.
                 string error = context.Request.QueryString["error"];
                 if (!string.IsNullOrEmpty(error))
                 {
                     listener.Stop();
-                    throw new InvalidOperationException($"Authorisation error returned by the server: {error}");
+                    throw new InvalidOperationException(
+                        $"Authorisation error returned by the server: {error}"
+                    );
+                }
+
+                string returnedState = context.Request.QueryString["state"];
+                if (returnedState != expectedState)
+                {
+                    listener.Stop();
+                    throw new InvalidOperationException(
+                        "The authorisation callback's state did not match the expected value — "
+                            + "rejecting for safety. Please retry the sign-in."
+                    );
                 }
 
                 authorizationCode = context.Request.QueryString["code"];
@@ -163,21 +336,14 @@ namespace AccC3DMetadata
                 {
                     listener.Stop();
                     throw new InvalidOperationException(
-                        "The authorisation response did not contain a code.");
+                        "The authorisation response did not contain a code."
+                    );
                 }
 
                 listener.Stop();
             }
 
-            // Exchange the authorisation code for access + refresh tokens.
-            // The code verifier is sent here (not during the browser step) — the server hashes it
-            // and compares with the challenge to prove the caller holds the original secret.
-            return await _authClient.GetThreeLeggedTokenAsync(
-                clientId,
-                authorizationCode,
-                redirectUri,
-                codeVerifier: codeVerifier)
-                .ConfigureAwait(false);
+            return authorizationCode;
         }
     }
 }

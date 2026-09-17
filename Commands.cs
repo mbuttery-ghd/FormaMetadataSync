@@ -1,9 +1,9 @@
+using System;
 using AccC3DMetadata.Models;
 using AccC3DMetadata.Services;
 using AccC3DMetadata.UI;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
-using System;
 
 namespace AccC3DMetadata
 {
@@ -36,14 +36,19 @@ namespace AccC3DMetadata
                 progressDlg.UpdateStatus("Loading configuration…");
                 var config = await orchestrator.LoadConfigAsync();
 
-                var result = await orchestrator.RunAsync(config, SyncDirection.Read,
-                    new Progress<string>(msg => progressDlg.UpdateStatus(msg)));
+                var result = await orchestrator.RunAsync(
+                    config,
+                    SyncDirection.Read,
+                    new Progress<string>(msg => progressDlg.UpdateStatus(msg))
+                );
 
-                Ed.WriteMessage($"\nPull complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s).");
+                ed.WriteMessage(
+                    $"\nPull complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s)."
+                );
             }
             catch (System.Exception ex)
             {
-                Ed.WriteMessage($"\nAccSyncPull failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncPull failed: {ex.Message}");
             }
             finally
             {
@@ -68,14 +73,19 @@ namespace AccC3DMetadata
                 progressDlg.UpdateStatus("Loading configuration…");
                 var config = await orchestrator.LoadConfigAsync();
 
-                var result = await orchestrator.RunAsync(config, SyncDirection.Write,
-                    new Progress<string>(msg => progressDlg.UpdateStatus(msg)));
+                var result = await orchestrator.RunAsync(
+                    config,
+                    SyncDirection.Write,
+                    new Progress<string>(msg => progressDlg.UpdateStatus(msg))
+                );
 
-                Ed.WriteMessage($"\nPush complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s).");
+                ed.WriteMessage(
+                    $"\nPush complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s)."
+                );
             }
             catch (System.Exception ex)
             {
-                Ed.WriteMessage($"\nAccSyncPush failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncPush failed: {ex.Message}");
             }
             finally
             {
@@ -102,18 +112,22 @@ namespace AccC3DMetadata
                 progressDlg.UpdateStatus("Loading configuration…");
                 var config = await orchestrator.LoadConfigAsync();
 
-                var result = await orchestrator.RunAsync(config, SyncDirection.ReadWrite,
-                    new Progress<string>(msg => progressDlg.UpdateStatus(msg)));
+                var result = await orchestrator.RunAsync(
+                    config,
+                    SyncDirection.ReadWrite,
+                    new Progress<string>(msg => progressDlg.UpdateStatus(msg))
+                );
 
-                Ed.WriteMessage(
-                    $"\nSync complete — {result.MappingsApplied} mapping(s), " +
-                    $"{result.ConflictsResolved} conflict(s) resolved, " +
-                    $"{result.ConflictsCancelled} conflict(s) cancelled, " +
-                    $"{result.Errors} error(s).");
+                ed.WriteMessage(
+                    $"\nSync complete — {result.MappingsApplied} mapping(s), "
+                        + $"{result.ConflictsResolved} conflict(s) resolved, "
+                        + $"{result.ConflictsCancelled} conflict(s) cancelled, "
+                        + $"{result.Errors} error(s)."
+                );
             }
             catch (System.Exception ex)
             {
-                Ed.WriteMessage($"\nAccSyncBoth failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncBoth failed: {ex.Message}");
             }
             finally
             {
@@ -134,23 +148,33 @@ namespace AccC3DMetadata
                 var orchestrator = new SyncOrchestrator(AcadDoc);
                 var config = await orchestrator.LoadConfigAsync();
 
-                Ed.WriteMessage($"\nConfig loaded successfully.");
-                Ed.WriteMessage($"\n  Hub:      {config.HubId ?? "(resolved from Desktop Connector path)"}");
-                Ed.WriteMessage($"\n  Project:  {config.ProjectId ?? "(resolved from Desktop Connector path)"}");
-                Ed.WriteMessage($"\n  Item:     {config.DrawingItemId ?? "(resolved from Desktop Connector path)"}");
-                Ed.WriteMessage($"\n  Mappings: {config.Mappings.Count}");
+                ed.WriteMessage($"\nConfig loaded successfully.");
+                ed.WriteMessage(
+                    $"\n  Hub:      {config.HubId ?? "(resolved from Desktop Connector path)"}"
+                );
+                ed.WriteMessage(
+                    $"\n  Project:  {config.ProjectId ?? "(resolved from Desktop Connector path)"}"
+                );
+                ed.WriteMessage(
+                    $"\n  Item:     {config.DrawingItemId ?? "(resolved from Desktop Connector path)"}"
+                );
+                ed.WriteMessage($"\n  Mappings: {config.Mappings.Count}");
 
                 foreach (var m in config.Mappings)
                 {
-                    string target = m.Target == MappingTarget.BlockAttribute
-                        ? $"{m.BlockName}.{m.BlockAttributeTag}"
-                        : $"{m.PropertySetName}.{m.PropertyName}";
-                    Ed.WriteMessage($"\n    [{m.Direction}] {m.AccAttributeName} → {m.Target}:{target}");
+                    string target =
+                        m.Target == MappingTarget.BlockAttribute
+                            ? $"{m.BlockName}.{m.BlockAttributeTag}"
+                            : $"{m.PropertySetName}.{m.PropertyName}";
+                    ed.WriteMessage(
+                        $"\n    [{m.Direction}] {m.AccAttributeName} → {m.Target}:{target}"
+                    );
                 }
+                ed.WriteMessage("\n");
             }
             catch (System.Exception ex)
             {
-                Ed.WriteMessage($"\nAccSyncLoadConfig failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncLoadConfig failed: {ex.Message}");
             }
         }
 
@@ -167,11 +191,13 @@ namespace AccC3DMetadata
                 var dlg = new ClientIdSettingsDialog();
                 bool saved = Application.ShowModalWindow(dlg) == true;
                 if (saved)
-                    Ed.WriteMessage("\nAPS Client ID saved. It will be used for the next authentication.");
+                    ed.WriteMessage(
+                        "\nAPS Client ID saved. It will be used for the next authentication."
+                    );
             }
             catch (System.Exception ex)
             {
-                Ed.WriteMessage($"\nAccSyncSettings failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncSettings failed: {ex.Message}");
             }
         }
     }
