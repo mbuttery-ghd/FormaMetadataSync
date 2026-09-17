@@ -43,12 +43,12 @@ namespace AccC3DMetadata
                 );
 
                 ed.WriteMessage(
-                    $"\nPull complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s)."
+                    $"\nPull complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s).\n"
                 );
             }
             catch (System.Exception ex)
             {
-                ed.WriteMessage($"\nAccSyncPull failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncPull failed: {ex.Message}\n");
             }
             finally
             {
@@ -80,12 +80,12 @@ namespace AccC3DMetadata
                 );
 
                 ed.WriteMessage(
-                    $"\nPush complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s)."
+                    $"\nPush complete — {result.MappingsApplied} mapping(s) applied, {result.Errors} error(s).\n"
                 );
             }
             catch (System.Exception ex)
             {
-                ed.WriteMessage($"\nAccSyncPush failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncPush failed: {ex.Message}\n");
             }
             finally
             {
@@ -122,12 +122,12 @@ namespace AccC3DMetadata
                     $"\nSync complete — {result.MappingsApplied} mapping(s), "
                         + $"{result.ConflictsResolved} conflict(s) resolved, "
                         + $"{result.ConflictsCancelled} conflict(s) cancelled, "
-                        + $"{result.Errors} error(s)."
+                        + $"{result.Errors} error(s).\n"
                 );
             }
             catch (System.Exception ex)
             {
-                ed.WriteMessage($"\nAccSyncBoth failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncBoth failed: {ex.Message}\n");
             }
             finally
             {
@@ -174,7 +174,7 @@ namespace AccC3DMetadata
             }
             catch (System.Exception ex)
             {
-                ed.WriteMessage($"\nAccSyncLoadConfig failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncLoadConfig failed: {ex.Message}\n");
             }
         }
 
@@ -192,12 +192,12 @@ namespace AccC3DMetadata
                 bool saved = Application.ShowModalWindow(dlg) == true;
                 if (saved)
                     ed.WriteMessage(
-                        "\nAPS Client ID saved. It will be used for the next authentication."
+                        "\nAPS Client ID saved. It will be used for the next authentication.\n"
                     );
             }
             catch (System.Exception ex)
             {
-                ed.WriteMessage($"\nAccSyncSettings failed: {ex.Message}");
+                ed.WriteMessage($"\nAccSyncSettings failed: {ex.Message}\n");
             }
         }
     }
