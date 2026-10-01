@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
@@ -19,6 +20,7 @@ namespace AccC3DMetadata.UI
     {
         private readonly List<(string BlockName, List<string> AttributeTags)> _blocks;
         private readonly SyncConfig _existingConfig;
+        private readonly Func<SyncConfig, IProgress<string>, Task> _saveAsync;
         private string _selectedBlock;
         private ObservableCollection<ConfigEditorRow> _rows;
 
@@ -26,6 +28,11 @@ namespace AccC3DMetadata.UI
         private readonly Grid _tablePage;
         private DataGrid _grid;
         private TextBlock _tableSubtitle;
+        private Border _busyOverlay;
+        private TextBlock _busyStatus;
+        private TextBlock _busyError;
+        private Button _busyCloseBtn;
+        private readonly List<Button> _tableButtons = new();
 
         private static readonly SolidColorBrush AccBlue = Freeze(
             new SolidColorBrush(Color.FromRgb(0, 120, 212))
@@ -49,13 +56,19 @@ namespace AccC3DMetadata.UI
         /// <summary>The merged config to save, populated when the user clicks Save.</summary>
         public SyncConfig Result { get; private set; }
 
+        /// <param name="saveAsync">
+        /// Performs the save (local write, Forma attribute reconciliation, upload). Runs while the
+        /// dialog stays open, reporting status through the supplied progress sink.
+        /// </param>
         public ConfigEditorDialog(
             List<(string BlockName, List<string> AttributeTags)> blocks,
-            SyncConfig existingConfig
+            SyncConfig existingConfig,
+            Func<SyncConfig, IProgress<string>, Task> saveAsync
         )
         {
             _blocks = blocks;
             _existingConfig = existingConfig;
+            _saveAsync = saveAsync;
 
             Title = "ACC Sync — Config Editor";
             Width = 820;
@@ -85,14 +98,88 @@ namespace AccC3DMetadata.UI
             _pickerPage = BuildBlockPickerPage();
             _tablePage = BuildAttributeTablePage();
             _tablePage.Visibility = Visibility.Collapsed;
+            _busyOverlay = BuildBusyOverlay();
+            _busyOverlay.Visibility = Visibility.Collapsed;
 
             Grid.SetRow(_pickerPage, 1);
             Grid.SetRow(_tablePage, 1);
+            Grid.SetRowSpan(_busyOverlay, 2);
 
             root.Children.Add(header);
             root.Children.Add(_pickerPage);
             root.Children.Add(_tablePage);
+            root.Children.Add(_busyOverlay);
             Content = root;
+        }
+
+        // ── Busy overlay shown while the save runs ──────────────────────────────────
+
+        private Border BuildBusyOverlay()
+        {
+            var panel = new StackPanel
+            {
+                VerticalAlignment = VerticalAlignment.Center,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(32),
+                MaxWidth = 520,
+            };
+
+            _busyStatus = new TextBlock
+            {
+                Text = "Saving…",
+                Foreground = TextDark,
+                FontSize = 13,
+                TextWrapping = TextWrapping.Wrap,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Margin = new Thickness(0, 0, 0, 12),
+            };
+
+            var bar = new ProgressBar
+            {
+                IsIndeterminate = true,
+                Height = 4,
+                Width = 320,
+                Foreground = AccBlue,
+                Background = Freeze(new SolidColorBrush(Color.FromRgb(225, 223, 221))),
+                BorderThickness = new Thickness(0),
+            };
+
+            _busyError = new TextBlock
+            {
+                Foreground = Freeze(new SolidColorBrush(Color.FromRgb(168, 0, 0))),
+                FontSize = 12,
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 12, 0, 0),
+                Visibility = Visibility.Collapsed,
+            };
+
+            _busyCloseBtn = new Button
+            {
+                Content = "Back",
+                Width = 90,
+                Height = 28,
+                Margin = new Thickness(0, 12, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Visibility = Visibility.Collapsed,
+            };
+            _busyCloseBtn.Click += (_, _) =>
+            {
+                _busyOverlay.Visibility = Visibility.Collapsed;
+                SetTableButtonsEnabled(true);
+            };
+
+            panel.Children.Add(_busyStatus);
+            panel.Children.Add(bar);
+            panel.Children.Add(_busyError);
+            panel.Children.Add(_busyCloseBtn);
+
+            return new Border { Background = Brushes.White, Child = panel };
+        }
+
+        private void SetTableButtonsEnabled(bool enabled)
+        {
+            foreach (var btn in _tableButtons)
+                btn.IsEnabled = enabled;
         }
 
         // ── Page 1: block picker ────────────────────────────────────────────────────
@@ -274,8 +361,9 @@ namespace AccC3DMetadata.UI
             var footer = BuildFooter(
                 ("Back", false, (_, _) => GoToBlockPicker()),
                 ("Cancel", false, (_, _) => DialogResult = false),
-                ("Save", true, (_, _) => OnSave())
+                ("Save", true, async (_, _) => await OnSaveAsync())
             );
+            _tableButtons.AddRange(((StackPanel)footer.Child).Children.OfType<Button>());
             Grid.SetRow(footer, 2);
 
             page.Children.Add(_tableSubtitle);
@@ -348,8 +436,11 @@ namespace AccC3DMetadata.UI
             _pickerPage.Visibility = Visibility.Visible;
         }
 
-        private void OnSave()
+        private async Task OnSaveAsync()
         {
+            // Commit any cell the user is still editing so its value reaches the bound row.
+            _grid.CommitEdit(DataGridEditingUnit.Row, true);
+
             var newBlockMappings = _rows
                 .Where(r => r.Use)
                 .Select(r => new SyncMapping
@@ -390,7 +481,30 @@ namespace AccC3DMetadata.UI
                 Mappings = preserved.Concat(newBlockMappings).ToList(),
             };
 
-            DialogResult = true;
+            if (_saveAsync == null)
+            {
+                DialogResult = true;
+                return;
+            }
+
+            SetTableButtonsEnabled(false);
+            _busyError.Visibility = Visibility.Collapsed;
+            _busyCloseBtn.Visibility = Visibility.Collapsed;
+            _busyStatus.Text = "Saving…";
+            _busyOverlay.Visibility = Visibility.Visible;
+
+            try
+            {
+                await _saveAsync(Result, new Progress<string>(msg => _busyStatus.Text = msg));
+                DialogResult = true;
+            }
+            catch (Exception ex)
+            {
+                _busyStatus.Text = "Save failed.";
+                _busyError.Text = ex.Message;
+                _busyError.Visibility = Visibility.Visible;
+                _busyCloseBtn.Visibility = Visibility.Visible;
+            }
         }
 
         // ── Shared UI helpers ────────────────────────────────────────────────────────

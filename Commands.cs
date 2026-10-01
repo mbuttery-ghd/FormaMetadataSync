@@ -252,21 +252,7 @@ namespace AccC3DMetadata
                     return;
                 }
 
-                var dlg = new ConfigEditorDialog(blocks, existingConfig);
-                bool accepted = Application.ShowModalWindow(dlg) == true;
-                if (!accepted)
-                {
-                    ed.WriteMessage("\nConfig editor cancelled.\n");
-                    return;
-                }
-
-                string xml = SyncConfigParser.Serialize(dlg.Result);
-
-                // Mirror the file locally so the sync commands (which only ever read the local
-                // file system) see it immediately, in addition to pushing it straight to ACC.
-                await File.WriteAllTextAsync(configPath, xml);
-
-                ed.WriteMessage("\nResolving ACC hub, project and folder for this drawing…");
+                ed.WriteMessage("\nResolving ACC project and folder for this drawing…");
                 var acc = new AccFileService();
                 string projectId,
                     folderId;
@@ -292,17 +278,50 @@ namespace AccC3DMetadata
                         );
                 }
 
-                ed.WriteMessage("\nUploading accsync.xml to Autodesk Forma…");
-                await acc.UploadFileToFolderAsync(
-                    projectId,
-                    folderId,
-                    "accsync.xml",
-                    Encoding.UTF8.GetBytes(xml),
-                    token
+                int createdAttributes = 0;
+
+                var dlg = new ConfigEditorDialog(
+                    blocks,
+                    existingConfig,
+                    async (config, progress) =>
+                    {
+                        string xml = SyncConfigParser.Serialize(config);
+
+                        // Mirror the file locally so the sync commands (which only read the local
+                        // file system) see it immediately, in addition to pushing it to ACC.
+                        progress.Report("Writing accsync.xml…");
+                        await File.WriteAllTextAsync(configPath, xml);
+
+                        var created = await acc.EnsureAttributeDefinitionsAsync(
+                            projectId,
+                            folderId,
+                            config.Mappings.Select(m => m.AccAttributeName),
+                            token,
+                            progress
+                        );
+                        createdAttributes = created.Count;
+
+                        progress.Report("Uploading accsync.xml to Autodesk Forma…");
+                        await acc.UploadFileToFolderAsync(
+                            projectId,
+                            folderId,
+                            "accsync.xml",
+                            Encoding.UTF8.GetBytes(xml),
+                            token
+                        );
+                    }
                 );
 
+                bool accepted = Application.ShowModalWindow(dlg) == true;
+                if (!accepted)
+                {
+                    ed.WriteMessage("\nConfig editor cancelled.\n");
+                    return;
+                }
+
                 ed.WriteMessage(
-                    $"\nConfig saved — {dlg.Result.Mappings.Count} mapping(s) written to {configPath}.\n"
+                    $"\nConfig saved — {dlg.Result.Mappings.Count} mapping(s) written to {configPath}, "
+                        + $"{createdAttributes} Forma attribute(s) created.\n"
                 );
             }
             catch (System.Exception ex)

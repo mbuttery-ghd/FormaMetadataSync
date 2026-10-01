@@ -496,50 +496,147 @@ namespace AccC3DMetadata.Services
         )> GetAttributeDefinitionMapsAsync(string projectId, string folderId, string accessToken)
         {
             string dmProjectId = StripBPrefix(projectId); // Document Management API does not use the "b." prefix.
-            var request = new HttpRequestMessage(
-                HttpMethod.Get,
-                $"{Bim360DocsBase}/projects/{dmProjectId}/folders/{Uri.EscapeDataString(folderId)}/custom-attribute-definitions"
-            );
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
-
-            var response = await _http.SendAsync(request).ConfigureAwait(false);
-            response.EnsureSuccessStatusCode();
-
-            using var doc = JsonDocument.Parse(
-                await response.Content.ReadAsStringAsync().ConfigureAwait(false)
-            );
-            var root = doc.RootElement;
 
             var nameToId = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             var idToName = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-            // The response may be a bare array or wrapped under "data" or "results" depending on
-            // the API version and account tier — probe all three shapes defensively.
-            var defsArray =
-                root.ValueKind == JsonValueKind.Array ? root
-                : root.TryGetProperty("results", out var r) ? r
-                : root.TryGetProperty("data", out var d) ? d
-                : default;
-
-            if (defsArray.ValueKind != JsonValueKind.Array)
-                return (nameToId, idToName); // No definitions found; return empty maps rather than throwing.
-
-            foreach (var def in defsArray.EnumerateArray())
+            // The endpoint defaults to 10 results per page, so page through at the 200 maximum
+            // until a short page is returned.
+            const int pageSize = 200;
+            for (int offset = 0; ; offset += pageSize)
             {
-                string id = def.TryGetProperty("id", out var idProp)
-                    ? JsonScalarToString(idProp)
-                    : null;
-                string name = def.TryGetProperty("name", out var nameProp)
-                    ? nameProp.GetString()
-                    : null;
-                if (id != null && name != null)
+                var request = new HttpRequestMessage(
+                    HttpMethod.Get,
+                    $"{Bim360DocsBase}/projects/{dmProjectId}/folders/{Uri.EscapeDataString(folderId)}"
+                        + $"/custom-attribute-definitions?limit={pageSize}&offset={offset}"
+                );
+                request.Headers.Authorization = new AuthenticationHeaderValue(
+                    "Bearer",
+                    accessToken
+                );
+
+                var response = await _http.SendAsync(request).ConfigureAwait(false);
+                response.EnsureSuccessStatusCode();
+
+                using var doc = JsonDocument.Parse(
+                    await response.Content.ReadAsStringAsync().ConfigureAwait(false)
+                );
+                var root = doc.RootElement;
+
+                // The response may be a bare array or wrapped under "data" or "results" depending on
+                // the API version and account tier — probe all three shapes defensively.
+                var defsArray =
+                    root.ValueKind == JsonValueKind.Array ? root
+                    : root.TryGetProperty("results", out var r) ? r
+                    : root.TryGetProperty("data", out var d) ? d
+                    : default;
+
+                if (defsArray.ValueKind != JsonValueKind.Array)
+                    break; // No definitions found; return whatever has been collected so far.
+
+                int count = 0;
+                foreach (var def in defsArray.EnumerateArray())
                 {
-                    nameToId[name] = id;
-                    idToName[id] = name;
+                    count++;
+                    string id = def.TryGetProperty("id", out var idProp)
+                        ? JsonScalarToString(idProp)
+                        : null;
+                    string name = def.TryGetProperty("name", out var nameProp)
+                        ? nameProp.GetString()
+                        : null;
+                    if (id != null && name != null)
+                    {
+                        nameToId[name] = id;
+                        idToName[id] = name;
+                    }
                 }
+
+                if (count < pageSize)
+                    break;
             }
 
             return (nameToId, idToName);
+        }
+
+        /// <summary>
+        /// Ensures every name in <paramref name="attributeNames"/> exists as a custom attribute
+        /// definition on <paramref name="folderId"/>, creating any that are missing as
+        /// <c>string</c> (text field) definitions.
+        /// </summary>
+        /// <param name="projectId">ACC project ID (the <c>b.</c> prefix is stripped internally).</param>
+        /// <param name="folderId">URN of the folder that scopes the definitions.</param>
+        /// <param name="attributeNames">The attribute names the config requires.</param>
+        /// <param name="accessToken">A valid 3-legged Bearer access token.</param>
+        /// <param name="progress">Optional sink for per-attribute status messages.</param>
+        /// <returns>The names of the definitions that were created.</returns>
+        public async Task<List<string>> EnsureAttributeDefinitionsAsync(
+            string projectId,
+            string folderId,
+            IEnumerable<string> attributeNames,
+            string accessToken,
+            IProgress<string> progress = null
+        )
+        {
+            progress?.Report("Checking Autodesk Forma custom attributes…");
+            var (nameToId, _) = await GetAttributeDefinitionMapsAsync(
+                    projectId,
+                    folderId,
+                    accessToken
+                )
+                .ConfigureAwait(false);
+
+            var missing = attributeNames
+                .Where(n => !string.IsNullOrWhiteSpace(n))
+                .Select(n => n.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(n => !nameToId.ContainsKey(n))
+                .ToList();
+
+            var created = new List<string>();
+            for (int i = 0; i < missing.Count; i++)
+            {
+                progress?.Report($"Creating attribute {i + 1} of {missing.Count}: {missing[i]}…");
+                await CreateAttributeDefinitionAsync(projectId, folderId, missing[i], accessToken)
+                    .ConfigureAwait(false);
+                created.Add(missing[i]);
+            }
+
+            return created;
+        }
+
+        /// <summary>
+        /// Creates a single <c>string</c>-typed custom attribute definition on a folder.
+        /// </summary>
+        private async Task CreateAttributeDefinitionAsync(
+            string projectId,
+            string folderId,
+            string name,
+            string accessToken
+        )
+        {
+            string dmProjectId = StripBPrefix(projectId);
+            var request = new HttpRequestMessage(
+                HttpMethod.Post,
+                $"{Bim360DocsBase}/projects/{dmProjectId}/folders/{Uri.EscapeDataString(folderId)}/custom-attribute-definitions"
+            )
+            {
+                Content = new StringContent(
+                    JsonSerializer.Serialize(new { name, type = "string" }),
+                    Encoding.UTF8,
+                    "application/json"
+                ),
+            };
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+
+            var response = await _http.SendAsync(request).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                string detail = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+                throw new InvalidOperationException(
+                    $"Could not create custom attribute '{name}' ({(int)response.StatusCode}): {detail}"
+                );
+            }
         }
 
         /// <summary>
